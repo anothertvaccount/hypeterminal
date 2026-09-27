@@ -14,8 +14,9 @@
  * without rewriting every caller's `onChange(e)` handler.
  */
 import { Input as BaseInput } from "@base-ui/react/input";
+import { CaretDownIcon, CaretUpIcon } from "@phosphor-icons/react";
 import type * as React from "react";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { cn } from "@/lib/cn";
 import { labelTypographyClass } from "./field-label";
 import { getInputClassName, type InputSize } from "./input";
@@ -62,6 +63,10 @@ interface Props extends Omit<React.ComponentProps<"input">, "type" | "onChange" 
 	label?: string;
 	labelValue?: React.ReactNode;
 	onLabelValueClick?: () => void;
+	/** Show ▲/▼ stepper buttons on the right edge; typing still works as before. */
+	showSteppers?: boolean;
+	/** Prefix for the stepper buttons' accessible names, e.g. "Number of Orders". */
+	stepperLabel?: string;
 }
 
 export function NumberInput({
@@ -83,9 +88,12 @@ export function NumberInput({
 	label,
 	labelValue,
 	onLabelValueClick,
+	showSteppers = false,
+	stepperLabel,
 	...props
 }: Props) {
 	const effectiveAllowDecimals = allowDecimals && (maxAllowedDecimals === undefined || maxAllowedDecimals > 0);
+	const inputRef = useRef<HTMLInputElement | null>(null);
 	const hasMax = maxLabel != null && onMaxClick != null;
 	const hasSuffix = !hasMax && suffix != null;
 
@@ -106,22 +114,27 @@ export function NumberInput({
 		[],
 	);
 
+	/** Step by ±step, clamped to min/max. Shared by the keyboard arrows and the
+	 *  visible stepper buttons so both paths behave identically. */
+	const stepValue = useCallback(
+		(input: HTMLInputElement | null | undefined, direction: 1 | -1) => {
+			if (!input) return;
+			const currentValue = parseFloat(input.value) || 0;
+			let newValue = currentValue + direction * step;
+			if (min !== undefined && newValue < min) newValue = min;
+			if (max !== undefined && newValue > max) newValue = max;
+			if (!allowNegative && newValue < 0) newValue = 0;
+			const newValueStr = effectiveAllowDecimals ? String(newValue) : String(Math.round(newValue));
+			onChange?.(createSyntheticEvent(input, newValueStr));
+		},
+		[allowNegative, createSyntheticEvent, effectiveAllowDecimals, max, min, onChange, step],
+	);
+
 	const handleKeyDown = useCallback(
 		(e: React.KeyboardEvent<HTMLInputElement>) => {
 			if (e.key === "ArrowUp" || e.key === "ArrowDown") {
 				e.preventDefault();
-				const input = e.currentTarget;
-				const currentValue = parseFloat(input.value) || 0;
-				const delta = e.key === "ArrowUp" ? step : -step;
-				let newValue = currentValue + delta;
-
-				if (min !== undefined && newValue < min) newValue = min;
-				if (max !== undefined && newValue > max) newValue = max;
-				if (!allowNegative && newValue < 0) newValue = 0;
-
-				const newValueStr = effectiveAllowDecimals ? String(newValue) : String(Math.round(newValue));
-				const syntheticEvent = createSyntheticEvent(input, newValueStr);
-				onChange?.(syntheticEvent);
+				stepValue(e.currentTarget, e.key === "ArrowUp" ? 1 : -1);
 				onKeyDown?.(e);
 				return;
 			}
@@ -162,7 +175,7 @@ export function NumberInput({
 
 			onKeyDown?.(e);
 		},
-		[effectiveAllowDecimals, allowNegative, min, max, step, onChange, onKeyDown, createSyntheticEvent],
+		[effectiveAllowDecimals, allowNegative, onKeyDown, stepValue],
 	);
 
 	const validateInputValue = useCallback(
@@ -189,13 +202,17 @@ export function NumberInput({
 
 	const inputEl = (
 		<BaseInput
+			ref={inputRef}
 			type="text"
 			inputMode={effectiveAllowDecimals ? "decimal" : "numeric"}
 			data-slot="input"
 			data-size={inputSize}
 			value={value}
 			disabled={disabled}
-			className={getInputClassName(inputSize, cn(hasMax && "pr-20", hasSuffix && "pr-7", className))}
+			className={getInputClassName(
+				inputSize,
+				cn(hasMax && "pr-20", hasSuffix && "pr-7", showSteppers && "pr-8", className),
+			)}
 			onKeyDown={handleKeyDown}
 			onChange={validateInputValue}
 			{...props}
@@ -203,6 +220,43 @@ export function NumberInput({
 	);
 
 	function renderInputWithAction() {
+		if (showSteppers) {
+			const bump = (direction: 1 | -1) => () => {
+				const input = inputRef.current;
+				if (input) stepValue(input, direction);
+			};
+			return (
+				<div className="relative">
+					{inputEl}
+					{/* Steppers live INSIDE the field: two half-height halves on the right
+					    edge. The 44px touch-target class cannot be used here (it made the
+					    pair taller than the input and spill below it) — a transparent
+					    pseudo layer gives the finger room without moving anything. */}
+					<div className="absolute right-1 top-0 bottom-0 flex flex-col justify-center">
+						<button
+							type="button"
+							aria-label={stepperLabel ? `${stepperLabel}: +1` : "Increase"}
+							disabled={disabled || (max !== undefined && (parseFloat(String(value ?? "")) || 0) >= max)}
+							onMouseDown={(e) => e.preventDefault()}
+							onClick={bump(1)}
+							className="relative flex h-1/2 w-6 items-center justify-center text-fg-muted transition-colors cursor-pointer hover:text-fg disabled:opacity-30 disabled:pointer-events-none after:content-[''] after:absolute after:-inset-y-1.5 after:-inset-x-1"
+						>
+							<CaretUpIcon className="size-3" weight="bold" aria-hidden="true" />
+						</button>
+						<button
+							type="button"
+							aria-label={stepperLabel ? `${stepperLabel}: -1` : "Decrease"}
+							disabled={disabled || (min !== undefined && (parseFloat(String(value ?? "")) || 0) <= min)}
+							onMouseDown={(e) => e.preventDefault()}
+							onClick={bump(-1)}
+							className="relative flex h-1/2 w-6 items-center justify-center text-fg-muted transition-colors cursor-pointer hover:text-fg disabled:opacity-30 disabled:pointer-events-none after:content-[''] after:absolute after:-inset-y-1.5 after:-inset-x-1"
+						>
+							<CaretDownIcon className="size-3" weight="bold" aria-hidden="true" />
+						</button>
+					</div>
+				</div>
+			);
+		}
 		if (hasMax) {
 			return (
 				<div className="relative">

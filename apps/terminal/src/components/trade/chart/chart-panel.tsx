@@ -3,7 +3,7 @@ import { Suspense, useState } from "react";
 import { getPositionDex } from "@/domain/market";
 import { useIntentScriptLoader } from "@/hooks/ui/use-intent-script-loader";
 import { TRADINGVIEW_SCRIPT_SRC } from "@/lib/chart/load-tradingview";
-import { useSelectedMarketInfo } from "@/lib/hyperliquid";
+import { chartSymbolFromMarket, useSelectedMarketInfo } from "@/lib/hyperliquid";
 import { createLazyComponent } from "@/lib/lazy";
 import { useRenderCommitTrack } from "@/lib/performance/render-profile";
 import { useTheme } from "@/stores/use-global-settings-store";
@@ -17,7 +17,9 @@ export function ChartPanel() {
 	useRenderCommitTrack("chart");
 	const theme = useTheme();
 	const { data: selectedMarket } = useSelectedMarketInfo();
-	const [chartType, setChartType] = useState<ChartType>("default");
+	// TradingView is the default chart on load; the original klinecharts canvas is
+	// one click away — and the automatic fallback if the widget fails to load.
+	const [chartType, setChartType] = useState<ChartType>("tradingview");
 	const chartTheme = theme === "dark" ? "dark" : "light";
 	const { intentHandlers: tradingViewIntentHandlers } = useIntentScriptLoader({
 		src: TRADINGVIEW_SCRIPT_SRC,
@@ -31,7 +33,7 @@ export function ChartPanel() {
 				<ClientOnly>
 					<Suspense fallback={<ChartLoadingFallback />}>
 						<KlineChart
-							symbol={selectedMarket.name}
+							symbol={chartSymbolFromMarket(selectedMarket.name, getPositionDex(selectedMarket))}
 							positionDex={getPositionDex(selectedMarket)}
 							theme={chartTheme}
 							onChartSourceChange={setChartType}
@@ -44,9 +46,11 @@ export function ChartPanel() {
 				<ClientOnly>
 					<Suspense fallback={<ChartLoadingFallback />}>
 						<TradingViewChart
-							symbol={selectedMarket.name}
+							symbol={chartSymbolFromMarket(selectedMarket.name, getPositionDex(selectedMarket))}
 							theme={chartTheme}
+							positionDex={getPositionDex(selectedMarket)}
 							onSwitchToDefault={() => setChartType("default")}
+							onLoadError={() => setChartType("default")}
 						/>
 					</Suspense>
 				</ClientOnly>

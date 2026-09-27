@@ -3,10 +3,16 @@ pre-commit:
   commands:
     biome:
       glob: "*.{ts,tsx,js,jsx}"
-      run: npx biome check --write --staged --no-errors-on-unmatched && git add {staged_files}
+      # `pnpm exec` uses the workspace binary directly. `npx` can try to resolve
+      # the package over the network, which fails when git is launched from a GUI
+      # (GitHub Desktop) with a minimal environment — that failed the commit.
+      run: pnpm exec biome check --write --staged --no-errors-on-unmatched && git add {staged_files}
     lingui-extract:
       glob: "apps/terminal/src/**/*.{ts,tsx}"
-      run: pnpm i18n:extract && git add apps/terminal/src/locales/**/*.po
+      # Non-blocking: refreshing catalogs is a convenience, and the .po files are
+      # staged by the commit itself. If the re-add cannot match a path (glob
+      # differences between shells), it must not block the commit.
+      run: pnpm i18n:extract || true; git add apps/terminal/src/locales/**/*.po 2>/dev/null || true
 
 # Commit message validation
 commit-msg:

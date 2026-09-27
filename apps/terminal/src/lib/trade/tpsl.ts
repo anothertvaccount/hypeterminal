@@ -1,6 +1,24 @@
 import { type Numeric, toBig, toSafeBig } from "./numbers";
 import type { Side } from "./types";
 
+/** Default distance applied when the TP/SL toggle turns on (% from the reference). */
+export const DEFAULT_TP_SL_PERCENT = 2;
+
+/**
+ * Fresh TP/SL defaults for the toggle: ±DEFAULT_TP_SL_PERCENT off the reference,
+ * side-aware (long: TP above / SL below; short inverted). Null when the reference
+ * is unusable — the caller then leaves the fields empty instead of guessing.
+ */
+export function calculateDefaultTpSl(
+	referencePrice: Numeric,
+	side: Side,
+	decimals: number,
+): { tp: string; sl: string } | null {
+	const tp = calculateTpPrice(referencePrice, side, DEFAULT_TP_SL_PERCENT, decimals);
+	const sl = calculateSlPrice(referencePrice, side, DEFAULT_TP_SL_PERCENT, decimals);
+	return tp !== null && sl !== null ? { tp, sl } : null;
+}
+
 export function calculateTpPrice(
 	referencePrice: Numeric,
 	side: Side,

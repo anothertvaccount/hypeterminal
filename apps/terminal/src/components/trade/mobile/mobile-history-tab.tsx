@@ -1,13 +1,12 @@
 import { t } from "@lingui/core/macro";
 import { ArrowSquareOutIcon, ClockCounterClockwiseIcon } from "@phosphor-icons/react";
 import { Skeleton } from "boneyard-js/react";
-import { useConnection } from "wagmi";
 import { FALLBACK_VALUE_PLACEHOLDER } from "@/config/app";
 import { MAX_HISTORY_ROWS } from "@/config/trade";
 import { cn } from "@/lib/cn";
 import { getExplorerTxUrl } from "@/lib/explorer";
 import { formatDateTimeShort, formatNumber, formatToken, formatUSD } from "@/lib/format";
-import { useMarkets, useSubscription } from "@/lib/hyperliquid";
+import { useMarkets, useSubscription, useTradingSession } from "@/lib/hyperliquid";
 import { toNumber } from "@/lib/trade/numbers";
 import { getValueColorClass } from "@/lib/ui/value-color";
 import { useExchangeScope } from "@/providers/exchange-scope";
@@ -20,7 +19,7 @@ interface Props {
 }
 
 export function MobileHistoryTab({ className }: Props) {
-	const { address, isConnected } = useConnection();
+	const { address, isActive } = useTradingSession();
 	const { scope } = useExchangeScope();
 	const { setSelectedMarket } = useMarketActions();
 	const markets = useMarkets();
@@ -28,19 +27,15 @@ export function MobileHistoryTab({ className }: Props) {
 		data: fillsEvent,
 		status,
 		error,
-	} = useSubscription(
-		"userFills",
-		{ user: address ?? "0x0", aggregateByTime: true },
-		{ enabled: isConnected && !!address },
-	);
+	} = useSubscription("userFills", { user: address ?? "0x0", aggregateByTime: true }, { enabled: isActive });
 
 	const fills = fillsEvent?.fills?.slice(0, MAX_HISTORY_ROWS).sort((a, b) => b.time - a.time) ?? [];
-	const headerCount = isConnected ? `${fills.length}` : FALLBACK_VALUE_PLACEHOLDER;
+	const headerCount = isActive ? `${fills.length}` : FALLBACK_VALUE_PLACEHOLDER;
 
-	if (!isConnected) {
+	if (!isActive) {
 		return (
 			<div className="flex-1 flex items-center justify-center p-6 text-sm text-fg-muted">
-				{t`Connect your wallet to view trade history.`}
+				{t`Connect your wallet or link a trading key to view trade history.`}
 			</div>
 		);
 	}

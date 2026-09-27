@@ -42,6 +42,7 @@ vi.mock("@lingui/core/macro", () => ({
 }));
 
 vi.mock("@phosphor-icons/react", () => ({
+	CaretDownIcon: Icon,
 	CheckIcon: Icon,
 	CopyIcon: Icon,
 	DeviceMobileIcon: Icon,
@@ -201,15 +202,16 @@ describe("MobileAgentSyncModal", () => {
 		});
 		await flushAsyncWork();
 
-		expect(testState.approveAgent).toHaveBeenCalledWith({
-			agentAddress: AGENT_ADDRESS,
-			agentName: AGENT_NAME,
-		});
+		// Preview builds never sign (vitest runs with VITE_PAPER_TRADE=true): the
+		// link embeds a preview marker instead of registering an on-chain approval.
+		expect(testState.approveAgent).not.toHaveBeenCalled();
 		expect(testState.createMobileAgentSyncUrl).toHaveBeenCalledWith({
 			agentName: AGENT_NAME,
 			agentPrivateKey: AGENT_PRIVATE_KEY,
 			agentValidUntilMs: AGENT_VALID_UNTIL_MS,
 			appOrigin: "https://app.hypeterminal.test",
+			routePath: "/mobile-agent-sync",
+			preview: true,
 			env: "Mainnet",
 			nowMs: 1_779_364_227_000,
 			userAddress: USER_ADDRESS,

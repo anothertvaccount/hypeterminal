@@ -6,6 +6,7 @@ export {
 	assertExchange,
 	type BuilderConfig,
 	calculateAssetId,
+	clearAgentSessionAddress,
 	createExchangeClient,
 	createKey,
 	type ExchangeMethod,
@@ -57,6 +58,7 @@ export {
 	type RegistrationStatus,
 	type RegistrationStep,
 	readAgentFromStorage,
+	readAgentSessionAddress,
 	removeAgentFromStorage,
 	type SubEvent,
 	type SubMethod,
@@ -66,13 +68,14 @@ export {
 	type SubscriptionStatus,
 	serializeKey,
 	subscriptionKeys,
+	type TradingSession,
 	type UseAgentRegistrationResult,
 	type UseAgentStatusResult,
 	type UseAgentWalletResult,
 	type UserPositions,
 	type UseUserWalletResult,
 	useAgentRegistration,
-	useAgentStatus,
+	useAgentSessionAddress,
 	useAgentWallet,
 	useAgentWalletActions,
 	useAgentWalletStorage,
@@ -86,17 +89,18 @@ export {
 	useInfo,
 	useSubscription,
 	useSubscriptionTransport,
-	useTradingGuard,
-	useUserPositions,
+	useTradingSession,
 	useUserWallet,
 	type WebSocketStatus,
 	WebSocketTransport,
 	type WebSocketTransportOptions,
 	WS_RELIABILITY_LIMITS,
+	writeAgentSessionAddress,
 	writeAgentToStorage,
 } from "@hypeterminal/hl-react";
-
 export type { MarketKind } from "@/domain/market";
+// Paper-trading overrides: same API, but agent approval and positions are simulated locally.
+export { useAgentStatus, useTradingGuard, useUserPositions } from "./paper-overrides";
 
 import {
 	getInfoClient as getInfoClientBase,
@@ -135,6 +139,6 @@ export {
 	type UnifiedMarket,
 	useMarkets,
 } from "./markets";
-export { getDexFromName, getMarketKindFromName } from "./markets/helper";
+export { chartSymbolFromMarket, getDexFromName, getMarketKindFromName } from "./markets/helper";
 export { type UseSpotTokensReturn, useSpotTokens } from "./markets/use-spot-tokens";
 export { type DepositStatus, type UseDepositResult, useDeposit } from "./use-deposit";

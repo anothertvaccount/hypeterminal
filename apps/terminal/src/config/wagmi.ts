@@ -25,7 +25,7 @@ import { coinbaseWallet, injected, mock, walletConnect } from "wagmi/connectors"
 import { APP_NAME } from "@/config/app";
 import { getWalletConnectProjectId } from "@/config/env";
 import type { MockWalletConfig } from "@/lib/wallet-utils";
-import { registerMockWallet } from "@/lib/wallet-utils";
+import { buildWalletReturnUrl, registerMockWallet } from "@/lib/wallet-utils";
 
 // All chains supported for LiFi bridging — wagmi requires these upfront
 const BRIDGE_CHAINS = [
@@ -79,12 +79,44 @@ interface WagmiConfigOptions {
 	env?: Record<string, string | undefined>;
 }
 
-const WALLET_CONNECT_METADATA = {
-	name: APP_NAME,
-	description: "Professional trading terminal for Hyperliquid.",
-	url: "https://app.hypeterminal.com",
-	icons: ["https://app.hypeterminal.com/icon-192.png"],
+// Metadata follows the ACTUAL deployment: WalletConnect verifies/allowlists the
+// origin in `url`, and a hardcoded production URL makes pairing from any other
+// host (a fork, a preview domain) mismatch what the wallet was told to expect.
+type WalletConnectMetadata = {
+	name: string;
+	description: string;
+	url: string;
+	icons: string[];
+	// Link Mode return path — the installed runtime supports it, the types lag.
+	redirect?: { universal: string; linkMode: "auto" };
 };
+
+const WALLET_CONNECT_METADATA: WalletConnectMetadata = (() => {
+	const base = import.meta.env.BASE_URL;
+	if (typeof window === "undefined") {
+		return {
+			name: APP_NAME,
+			description: "Professional trading terminal for Hyperliquid.",
+			url: "https://app.hypeterminal.com",
+			icons: ["https://app.hypeterminal.com/icon-192.png"],
+		};
+	}
+	const origin = window.location.origin;
+	const appUrl = `${origin}${base}`;
+	return {
+		name: APP_NAME,
+		description: "Professional trading terminal for Hyperliquid.",
+		url: appUrl,
+		icons: [`${origin}${base}icon-192.png`],
+		// Link Mode: after approving in the wallet app, the wallet bounces the user
+		// straight back here (no manual "switch back to the browser"). The `wc=1`
+		// marker lets the app auto-resume the approved session on return.
+		redirect: {
+			universal: buildWalletReturnUrl(origin, base),
+			linkMode: "auto",
+		},
+	};
+})();
 
 function isPresent<T>(value: T | null | undefined): value is T {
 	return value != null;
@@ -98,7 +130,9 @@ export function createWagmiConfig(options: WagmiConfigOptions = {}) {
 	const walletConnectConnector = walletConnectProjectId
 		? walletConnect({
 				projectId: walletConnectProjectId,
-				metadata: WALLET_CONNECT_METADATA,
+				// The installed runtime supports `metadata.redirect` (Link Mode) but the
+				// bundled types predate it — narrow, documented cast.
+				metadata: WALLET_CONNECT_METADATA as Parameters<typeof walletConnect>[0]["metadata"],
 				showQrModal: false,
 			})
 		: null;

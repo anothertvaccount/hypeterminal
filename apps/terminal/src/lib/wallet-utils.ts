@@ -33,6 +33,30 @@ export function isMockConnector(connector: Connector): boolean {
 	return connector.id === "mock" || connector.type === "mock";
 }
 
+export const WC_RETURN_MARKER = "wc";
+
+/**
+ * WalletConnect Link Mode redirect target: after approving, the wallet bounces the
+ * user back to this exact app URL (instead of leaving them in the wallet). The
+ * `?wc=1` marker tells the app a return happened so it can re-attach the approved
+ * session, which the page reload discarded.
+ */
+export function buildWalletReturnUrl(origin: string, basePath: string): string {
+	return `${origin}${basePath}?${WC_RETURN_MARKER}=1`;
+}
+
+/**
+ * Consume the return marker: true when the user just came back from the wallet
+ * (URL is rewritten in place so a refresh doesn't loop).
+ */
+export function consumeWalletReturnMarker(href: string = window.location.href): boolean {
+	const url = new URL(href);
+	if (url.searchParams.get(WC_RETURN_MARKER) !== "1") return false;
+	url.searchParams.delete(WC_RETURN_MARKER);
+	window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+	return true;
+}
+
 export function isWalletConnectConnector(connector: Connector): boolean {
 	return connector.id === "walletConnect" || connector.type === "walletConnect";
 }
@@ -128,6 +152,91 @@ type ConnectorEmitter = {
 	on(eventName: "message", handler: ConnectorMessageHandler): void;
 	off(eventName: "message", handler: ConnectorMessageHandler): void;
 };
+
+/**
+ * Re-run wagmi's reconnect — but only once the connector is actually usable.
+ *
+ * WalletConnect's provider initializes asynchronously from IndexedDB. Asking the
+ * connector to reconnect before that finishes makes the SDK call `provider.request`
+ * on `undefined` → "Cannot read properties of undefined (reading 'request')".
+ * So for WalletConnect we wait (up to ~3s) for the provider to appear, and every
+ * path is wrapped: a failed resume must never surface as an unhandled error —
+ * the user can always connect manually from the wallet list.
+ */
+export async function reconnectWhenReady(
+	connectors: readonly Connector[],
+	reconnect: () => void,
+	{ attempts = 20, intervalMs = 150 }: { attempts?: number; intervalMs?: number } = {},
+): Promise<boolean> {
+	const walletConnect = connectors.find(isWalletConnectConnector);
+	if (!walletConnect) {
+		try {
+			reconnect();
+			return true;
+		} catch {
+			return false;
+		}
+	}
+	for (let attempt = 0; attempt < attempts; attempt++) {
+		try {
+			const provider = await walletConnect.getProvider();
+			if (provider) {
+				reconnect();
+				return true;
+			}
+		} catch {
+			return false;
+		}
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+	}
+	return false;
+}
+
+/**
+ * Which wallet app is behind the active connector, and how to open it.
+ *
+ * A WalletConnect session reports the connected wallet through the session peer's
+ * metadata, so "the account is connected via walletConnect" is not enough to know
+ * that the person is in MetaMask — we read the peer name and match it against the
+ * known wallets. Injected/extension wallets already live in the page, so they get no
+ * button.
+ */
+export function resolveWalletDeepLink(input: {
+	connectorId?: string;
+	peerName?: string;
+}): { name: string; deepLink: string } | null {
+	const peer = (input.peerName ?? "").toLowerCase();
+	const candidates: string[] = [];
+	if (peer) candidates.push(peer);
+	if (input.connectorId) candidates.push(input.connectorId.toLowerCase());
+	for (const needle of candidates) {
+		for (const [key, info] of Object.entries(WALLET_INFO)) {
+			if (!info.deepLink) continue;
+			const keyLower = key.toLowerCase();
+			if (keyLower.includes("walletconnect") || keyLower === "inject") continue;
+			if (needle.includes(keyLower) || keyLower.includes(needle)) {
+				return {
+					name: key.replace(/^metaMask$/, "MetaMask").replace(/^coinbase$/, "Coinbase Wallet"),
+					deepLink: info.deepLink,
+				};
+			}
+		}
+	}
+	return null;
+}
+
+/** Peer wallet name from a live WalletConnect session (best effort, never throws). */
+export async function readWalletConnectPeerName(connector: Connector | undefined): Promise<string | undefined> {
+	if (!connector || !isWalletConnectConnector(connector)) return undefined;
+	try {
+		const provider = (await connector.getProvider()) as
+			| { session?: { peer?: { metadata?: { name?: string } } } }
+			| undefined;
+		return provider?.session?.peer?.metadata?.name;
+	} catch {
+		return undefined;
+	}
+}
 
 export function subscribeWalletConnectUri(connector: Connector, onUri: (uri: string) => void): () => void {
 	if (!isWalletConnectConnector(connector)) return () => {};

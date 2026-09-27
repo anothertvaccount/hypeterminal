@@ -1,8 +1,9 @@
 import { Button } from "@hypeterminal/ui";
 import { t } from "@lingui/core/macro";
 import { CheckIcon, LightningIcon, SpinnerGapIcon, XIcon } from "@phosphor-icons/react";
-import { useEffect } from "react";
-import { ORDER_TOAST_SUCCESS_DURATION_MS } from "@/config/time";
+import { useEffect, useRef, useState } from "react";
+import { ORDER_TOAST_DISMISS_MS, ORDER_TOAST_SUCCESS_DURATION_MS } from "@/config/time";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/cn";
 import type { OrderOutcome } from "@/lib/trade/extract-order-status";
 import { type OrderQueueItem, useOrderQueue, useOrderQueueActions } from "@/stores/use-order-queue-store";
@@ -154,9 +155,34 @@ function CountdownBar({ order }: { order: OrderQueueItem }) {
 }
 
 export function OrderToast() {
+	const isMobile = useIsMobile();
 	const orders = useOrderQueue();
 	const { removeOrder } = useOrderQueueActions();
-	if (orders.length === 0) return null;
+	const [dismissed, setDismissed] = useState(false);
+	const newestId = orders[orders.length - 1]?.id;
+
+	// A NEW order always brings the queue back. Compared against the last id we saw so
+	// the effect genuinely depends on it (a new row, not a re-render, un-dismisses).
+	const lastNewestIdRef = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		if (lastNewestIdRef.current === newestId) return;
+		lastNewestIdRef.current = newestId;
+		setDismissed(false);
+	}, [newestId, lastNewestIdRef]);
+
+	// …then it hides itself after ORDER_TOAST_DISMISS_MS of quiet (or instantly on
+	// the manual close). Updates/removals of existing rows re-arm the timer but do
+	// not resurrect a dismissed box.
+	useEffect(() => {
+		if (dismissed || orders.length === 0) return;
+		const ms = import.meta.env.DEV
+			? ((globalThis as { __hlOrderToastDismissMs?: number }).__hlOrderToastDismissMs ?? ORDER_TOAST_DISMISS_MS)
+			: ORDER_TOAST_DISMISS_MS;
+		const timer = setTimeout(() => setDismissed(true), ms);
+		return () => clearTimeout(timer);
+	}, [orders, dismissed]);
+
+	if (dismissed || orders.length === 0) return null;
 
 	const pendingCount = orders.filter((o) => o.status === "pending").length;
 	const successCount = orders.filter((o) => o.status === "success").length;
@@ -165,8 +191,14 @@ export function OrderToast() {
 	return (
 		<div
 			className={cn(
-				ORDER_TOAST_WIDTH,
-				"fixed bottom-6 right-6 z-50",
+				// Phone: the panel is docked to the TOP, full width. It used to sit
+				// bottom-right, where it collided with the toasts (same corner, same
+				// 20rem width) and covered the bottom nav. Top vs bottom-centre keeps
+				// the two surfaces apart and leaves the nav tappable.
+				isMobile
+					? "inset-x-2 top-[3.25rem] w-auto max-h-[32vh] overflow-y-auto"
+					: cn(ORDER_TOAST_WIDTH, "bottom-6 right-6"),
+				"fixed z-50",
 				"bg-surface/95 backdrop-blur-sm",
 				"border border-stroke-weak/60 rounded-8 overflow-hidden",
 				"shadow-overlay shadow-black/20 dark:shadow-black/50",
@@ -193,6 +225,14 @@ export function OrderToast() {
 							{failedCount} {t`failed`}
 						</span>
 					)}
+					<button
+						type="button"
+						aria-label={t`Dismiss order queue`}
+						onClick={() => setDismissed(true)}
+						className="p-1 rounded text-fg-muted hover:text-fg hover:bg-fill-hover transition-colors cursor-pointer"
+					>
+						<XIcon className="size-3.5" />
+					</button>
 				</div>
 			</div>
 

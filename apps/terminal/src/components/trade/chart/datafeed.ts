@@ -89,6 +89,8 @@ async function isKnownCoin(coin: string): Promise<boolean> {
 
 async function inferPriceScale(coin: string): Promise<number> {
 	try {
+		// Builder mids come back under the qualified "dex:coin" key, same as the
+		// chart symbol — one lookup works for both.
 		const mids = await getAllMids(getDexFromName(coin));
 		return inferPriceScaleFromMids(coin, mids);
 	} catch {
@@ -183,6 +185,8 @@ export function createDatafeed(): IBasicDataFeed {
 					return;
 				}
 
+				// HIP-3 builder markets stay as "dex:coin" (e.g. xyz:SP500) — the
+				// info API resolves the colon form itself.
 				const coin = coinFromSymbolName(symbolInfo.ticker ?? symbolInfo.name);
 				const fromMs = Math.max(0, Math.floor(periodParams.from * 1000));
 				const toMs = Math.max(0, Math.floor(periodParams.to * 1000));

@@ -5,6 +5,8 @@ import {
 	MOBILE_BOTTOM_NAV_HEIGHT_PX,
 	MOBILE_BREAKPOINT_PX,
 } from "@/config/layout";
+import { useChaseOrderEngine } from "@/hooks/trade/use-chase-order";
+import { useTradeHotkeys } from "@/hooks/trade/use-trade-hotkeys";
 import { TabTitleSync } from "@/hooks/use-document-title";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/cn";
@@ -17,6 +19,10 @@ import { TestnetBanner } from "./testnet-banner";
 const MobileTerminal = createLazyComponent(() => import("./mobile/mobile-terminal"), "MobileTerminal");
 
 const GlobalModals = createLazyComponent(() => import("./components/global-modals"), "GlobalModals");
+
+import { FillNotifications } from "../notifications/fill-notifications";
+import { HotkeysHelp } from "./hotkeys-help";
+
 const FooterBar = createLazyComponent(() => import("./footer/footer-bar"), "FooterBar");
 
 if (typeof window !== "undefined" && window.innerWidth < MOBILE_BREAKPOINT_PX) {
@@ -24,6 +30,8 @@ if (typeof window !== "undefined" && window.innerWidth < MOBILE_BREAKPOINT_PX) {
 }
 
 export function TradeTerminalPage() {
+	useTradeHotkeys();
+	useChaseOrderEngine();
 	const isMobile = useIsMobile();
 	const isTestnet = useIsTestnet();
 
@@ -53,6 +61,8 @@ export function TradeTerminalPage() {
 			<Suspense fallback={null}>
 				<GlobalModals />
 			</Suspense>
+			<FillNotifications />
+			<HotkeysHelp />
 		</>
 	);
 }

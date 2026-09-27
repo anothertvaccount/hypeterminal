@@ -1,12 +1,11 @@
 import { t } from "@lingui/core/macro";
 import { PercentIcon } from "@phosphor-icons/react";
 import { Skeleton } from "boneyard-js/react";
-import { useConnection } from "wagmi";
 import { FALLBACK_VALUE_PLACEHOLDER } from "@/config/app";
 import { MAX_HISTORY_ROWS } from "@/config/trade";
 import { cn } from "@/lib/cn";
 import { formatDateTimeShort, formatPercent, formatToken, formatUSD } from "@/lib/format";
-import { useMarkets, useSubscription } from "@/lib/hyperliquid";
+import { useMarkets, useSubscription, useTradingSession } from "@/lib/hyperliquid";
 import { toNumber, toNumberOrZero } from "@/lib/trade/numbers";
 import { getValueColorClass } from "@/lib/ui/value-color";
 import { useExchangeScope } from "@/providers/exchange-scope";
@@ -19,28 +18,28 @@ interface Props {
 }
 
 export function MobileFundingTab({ className }: Props) {
-	const { address, isConnected } = useConnection();
+	const { address, isActive } = useTradingSession();
 	const { scope } = useExchangeScope();
 	const { setSelectedMarket } = useMarketActions();
 	const {
 		data: fundingEvent,
 		status,
 		error,
-	} = useSubscription("userFundings", { user: address ?? "0x0" }, { enabled: isConnected && !!address });
+	} = useSubscription("userFundings", { user: address ?? "0x0" }, { enabled: isActive });
 	const markets = useMarkets();
 
 	const updates = fundingEvent?.fundings?.slice(0, MAX_HISTORY_ROWS).sort((a, b) => b.time - a.time) ?? [];
 	const totalFunding = updates.reduce((acc, f) => acc + toNumberOrZero(f.usdc), 0);
 	const headerTotal =
-		isConnected && status === "active"
+		isActive && status === "active"
 			? formatUSD(totalFunding, { signDisplay: "exceptZero" })
 			: FALLBACK_VALUE_PLACEHOLDER;
 	const headerClass = getValueColorClass(totalFunding);
 
-	if (!isConnected) {
+	if (!isActive) {
 		return (
 			<div className="flex-1 flex items-center justify-center p-6 text-sm text-fg-muted">
-				{t`Connect your wallet to view funding payments.`}
+				{t`Connect your wallet or link a trading key to view funding payments.`}
 			</div>
 		);
 	}

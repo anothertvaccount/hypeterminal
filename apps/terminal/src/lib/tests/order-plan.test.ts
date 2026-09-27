@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getExecutedPrice } from "@/domain/trade/order/price";
 import { buildOrderPlan } from "@/domain/trade/order-intent";
-import { buildOrders } from "@/domain/trade/orders";
+import { buildOrders, canPreviewScale, getScaleLevelPrices } from "@/domain/trade/orders";
 import { interpretOrderStatuses, NO_EXCHANGE_RESPONSE } from "@/lib/trade/extract-order-status";
 
 const ENTRY_BASE = {
@@ -60,6 +60,14 @@ describe("buildOrderPlan entry (characterization)", () => {
 		expect(plan.grouping).toBe("na");
 	});
 
+	it("builds a chase limit with the chosen tif (post-only placement is book-priced)", () => {
+		const postOnly = buildOrderPlan({ ...ENTRY_BASE, orderType: "chaseLimit", price: 99, tif: "Alo" });
+		expect(postOnly.orders).toEqual([{ a: 0, b: true, p: "99", s: "1.5", r: false, t: { limit: { tif: "Alo" } } }]);
+		expect(postOnly.grouping).toBe("na");
+		const gtc = buildOrderPlan({ ...ENTRY_BASE, orderType: "chaseLimit", price: 99, tif: "Gtc" });
+		expect(gtc.orders[0].t).toEqual({ limit: { tif: "Gtc" } });
+	});
+
 	it("attaches a reduce-only tp trigger and switches grouping to normalTpsl", () => {
 		const plan = buildOrderPlan({ ...ENTRY_BASE, tpSlEnabled: true, canUseTpSl: true, tpPriceNum: 110 });
 		expect(plan.orders).toEqual([
@@ -67,6 +75,40 @@ describe("buildOrderPlan entry (characterization)", () => {
 			{ a: 0, b: false, p: "110", s: "1.5", r: true, t: { trigger: { isMarket: true, triggerPx: "110", tpsl: "tp" } } },
 		]);
 		expect(plan.grouping).toBe("normalTpsl");
+	});
+
+	it("scale entries attach shared TP/SL triggers after the ladder (normalTpsl)", () => {
+		const plan = buildOrderPlan({
+			...ENTRY_BASE,
+			orderType: "scale",
+			sizeValue: 3,
+			scaleStartPriceInput: "100",
+			scaleEndPriceInput: "110",
+			scaleLevelsNum: 3,
+			tpSlEnabled: true,
+			canUseTpSl: true,
+			tpPriceNum: 120,
+			slPriceNum: 90,
+		});
+		expect(plan.grouping).toBe("normalTpsl");
+		// Ladder mains first (size1 each), then FULL-size (3) reduce-only triggers.
+		expect(plan.orders.map((o) => o.p)).toEqual(["100", "105", "110", "120", "90"]);
+		expect(plan.orders[3].s).toBe("3");
+		expect(plan.orders[3].b).toBe(false);
+		expect(plan.orders.slice(3).map((o) => o.t)).toEqual([
+			{ trigger: { isMarket: true, triggerPx: "120", tpsl: "tp" } },
+			{ trigger: { isMarket: true, triggerPx: "90", tpsl: "sl" } },
+		]);
+		expect(plan.orders.slice(3).every((o) => o.r)).toBe(true);
+	});
+
+	it("canUseTpSl allows scale — and still refuses triggers and twap", async () => {
+		const { canUseTpSl } = await import("@/lib/trade/order-types");
+		expect(canUseTpSl("scale")).toBe(true);
+		expect(canUseTpSl("market")).toBe(true);
+		expect(canUseTpSl("limit")).toBe(true);
+		expect(canUseTpSl("stopMarket")).toBe(false);
+		expect(canUseTpSl("twap")).toBe(false);
 	});
 
 	it("builds scale orders evenly spaced across the price range", () => {
@@ -81,6 +123,29 @@ describe("buildOrderPlan entry (characterization)", () => {
 		expect(plan.orders.map((o) => o.p)).toEqual(["100", "105", "110"]);
 		expect(plan.orders.every((o) => o.s === "1")).toBe(true);
 		expect(plan.grouping).toBe("na");
+	});
+
+	it("scale previews land on the exact prices buildScaleOrders would submit", () => {
+		const plan = buildOrderPlan({
+			...ENTRY_BASE,
+			orderType: "scale",
+			sizeValue: 3,
+			scaleStartPriceInput: "83000",
+			scaleEndPriceInput: "85000",
+			scaleLevelsNum: 4,
+		});
+		const preview = getScaleLevelPrices("83000", "85000", 4);
+		expect(preview).toEqual(["83000", "83667", "84333", "85000"]);
+		expect(preview).toEqual(plan.orders.map((o) => o.p));
+	});
+
+	it("canPreviewScale gates on usable start/end prices and level count", () => {
+		expect(canPreviewScale("83000", "85000", 4)).toBe(true);
+		expect(canPreviewScale("", "85000", 4)).toBe(false);
+		expect(canPreviewScale("83000", "0", 4)).toBe(false);
+		expect(canPreviewScale("83000", "abc", 4)).toBe(false);
+		expect(canPreviewScale("83000", "85000", 1)).toBe(false);
+		expect(canPreviewScale("83000", "85000", 21)).toBe(false);
 	});
 
 	it("builds a stop-market trigger with isMarket and sl tpsl", () => {
@@ -258,6 +323,25 @@ describe("buildOrderPlan close/reverse/tpsl (characterization)", () => {
 		expect(plan.grouping).toBe("positionTpsl");
 	});
 
+	it("position-trigger plans (dragged TP/SL) always use positionTpsl, never normalTpsl", async () => {
+		// Hyperliquid rejects a trigger-only batch under normalTpsl with
+		// "Main order cannot be trigger order" — this exact plan is what the
+		// position-line drag / axis menu / chart hotkeys submit live.
+		const { buildTpSlExchangeOrder, buildPositionTriggerPlan } = await import("@/domain/trade/order/chart-labels");
+		const trigger = buildTpSlExchangeOrder({
+			assetId: 0,
+			isBuy: false,
+			size: "0.00017",
+			triggerPrice: 82855,
+			tpsl: "sl",
+		});
+		const plan = buildPositionTriggerPlan(trigger);
+		expect(plan.grouping).toBe("positionTpsl");
+		expect(plan.orders).toEqual([trigger]);
+		expect(plan.orders[0].r).toBe(true);
+		expect(plan.orders[0].t).toEqual({ trigger: { isMarket: true, triggerPx: "82855", tpsl: "sl" } });
+	});
+
 	it("reports an error when position tpsl has no prices", () => {
 		const plan = buildOrderPlan({ kind: "positionTpsl", assetId: 0, isLong: true, tpPriceNum: null, slPriceNum: null });
 		expect(plan.orders).toEqual([]);
@@ -321,5 +405,15 @@ describe("buildOrders grouping (characterization)", () => {
 		});
 		expect(result.grouping).toBe("na");
 		expect(result.orders).toHaveLength(1);
+	});
+});
+
+describe("chartSymbolFromMarket", () => {
+	it("qualifies HIP-3 builder markets so the chart datafeed can resolve them", async () => {
+		const { chartSymbolFromMarket } = await import("@/lib/hyperliquid/markets/helper");
+		expect(chartSymbolFromMarket("SP500", "xyz")).toBe("xyz:SP500");
+		expect(chartSymbolFromMarket("xyz:SP500", "xyz")).toBe("xyz:SP500");
+		expect(chartSymbolFromMarket("BTC", undefined)).toBe("BTC");
+		expect(chartSymbolFromMarket("BTC", "")).toBe("BTC");
 	});
 });

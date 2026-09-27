@@ -1,5 +1,4 @@
-import { type MarketKind, useInfo } from "@hypeterminal/hl-react";
-import { useConnection } from "wagmi";
+import { type MarketKind, useInfo, useTradingSession } from "@hypeterminal/hl-react";
 import {
 	ORDER_FEE_RATE_MAKER,
 	ORDER_FEE_RATE_SPOT_MAKER,
@@ -22,14 +21,14 @@ function getDefaults(marketKind?: MarketKind): FeeRates {
 }
 
 export function useFeeRates(marketKind?: MarketKind): FeeRates {
-	const { address, isConnected } = useConnection();
+	const { address, isActive } = useTradingSession();
 	const defaults = getDefaults(marketKind);
 	const user = address ?? "";
 
 	const { data } = useInfo(
 		"userFees",
 		{ user },
-		{ enabled: isConnected && Boolean(address), staleTime: USER_FEES_STALE_TIME_MS, persist: true },
+		{ enabled: isActive, staleTime: USER_FEES_STALE_TIME_MS, persist: true },
 	);
 
 	if (!data) return defaults;

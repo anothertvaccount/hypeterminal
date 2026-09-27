@@ -68,6 +68,11 @@ const useOrderQueueStore = create<OrderQueueStore>()((set) => ({
 	},
 }));
 
+if (import.meta.env.DEV) {
+	// Debug affordance for browser test scripts (dev builds only).
+	(globalThis as { __hlQueue?: typeof useOrderQueueStore }).__hlQueue = useOrderQueueStore;
+}
+
 export function useOrderQueue() {
 	return useOrderQueueStore((state) => state.orders);
 }

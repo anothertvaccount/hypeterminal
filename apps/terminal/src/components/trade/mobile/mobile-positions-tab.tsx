@@ -4,11 +4,11 @@ import { ChartLineIcon, ListChecksIcon, TrendUpIcon } from "@phosphor-icons/reac
 import { Skeleton } from "boneyard-js/react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useConnection } from "wagmi";
 import { FALLBACK_VALUE_PLACEHOLDER, HL_ALL_DEXS } from "@/config/app";
 import { buildOrderPlan } from "@/domain/trade/order-intent";
+import { useChaseClose } from "@/hooks/trade/use-chase-close";
 import { useSubmitPlan } from "@/hooks/trade/use-submit-plan";
-import { useMarkets, useSubscription, useUserPositions } from "@/lib/hyperliquid";
+import { useMarkets, useSubscription, useTradingSession, useUserPositions } from "@/lib/hyperliquid";
 import { buildClosePositionDescription } from "@/lib/trade/close-toast";
 import { buildTpSlOrdersByCoin } from "@/lib/trade/open-orders";
 import type { Side } from "@/lib/trade/types";
@@ -22,7 +22,7 @@ import { PositionTpSlModal } from "../positions/position-tpsl-modal";
 import { MobilePositionCard } from "./mobile-position-card";
 
 export function MobilePositionsTab() {
-	const { address, isConnected } = useConnection();
+	const { address, isActive } = useTradingSession();
 	const slippageBps = useMarketOrderSlippageBps();
 	const { scope } = useExchangeScope();
 	const { setSelectedMarket } = useMarketActions();
@@ -45,14 +45,14 @@ export function MobilePositionsTab() {
 	const { positions, isLoading: positionsLoading, hasError: positionsError } = useUserPositions();
 	const markets = useMarkets();
 
-	const allMidsEnabled = isConnected && positions.length > 0;
+	const allMidsEnabled = isActive && positions.length > 0;
 	const { data: allMidsEvent } = useSubscription("allMids", { dex: HL_ALL_DEXS }, { enabled: allMidsEnabled });
 	const mids = allMidsEvent?.mids;
 
 	const { data: openOrdersEvent } = useSubscription(
 		"openOrders",
 		{ user: address ?? "0x0", dex: HL_ALL_DEXS },
-		{ enabled: isConnected && !!address },
+		{ enabled: isActive },
 	);
 	const openOrders = openOrdersEvent?.orders ?? [];
 
@@ -110,17 +110,25 @@ export function MobilePositionsTab() {
 		setLimitCloseModalOpen(true);
 	}
 
+	const chaseClose = useChaseClose();
+
+	function handleChaseClose(data: ClosePositionData) {
+		// No navigation: the order form is always mounted (hidden) in the shell, so the
+		// chase submits in place and the user stays on Positions — same as desktop.
+		chaseClose(data);
+	}
+
 	function handleOpenTpSlModal(data: TpSlPositionData) {
 		setSelectedTpSlPosition(data);
 		setTpSlModalOpen(true);
 	}
 
-	const headerCount = isConnected ? positions.length : FALLBACK_VALUE_PLACEHOLDER;
+	const headerCount = isActive ? positions.length : FALLBACK_VALUE_PLACEHOLDER;
 
-	if (!isConnected) {
+	if (!isActive) {
 		return (
 			<div className="flex-1 flex items-center justify-center p-6 text-sm text-fg-muted">
-				{t`Connect your wallet to view positions.`}
+				{t`Connect your wallet or link a trading key to view positions.`}
 			</div>
 		);
 	}
@@ -177,6 +185,7 @@ export function MobilePositionsTab() {
 								closeErrorMessage={closeErrorMessage}
 								onClose={handleClosePosition}
 								onLimitClose={handleOpenLimitCloseModal}
+								onChaseClose={handleChaseClose}
 								onOpenTpSl={handleOpenTpSlModal}
 								onSelectMarket={handleSelectMarket}
 							/>

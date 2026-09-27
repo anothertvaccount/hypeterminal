@@ -1,12 +1,12 @@
 import { FireIcon } from "@phosphor-icons/react";
 import { ClientOnly } from "@tanstack/react-router";
 import { Skeleton } from "boneyard-js/react";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { UI_TEXT } from "@/config/ui-text";
 import { get24hChange, getOiUsd, getPositionDex } from "@/domain/market";
 import { cn } from "@/lib/cn";
 import { formatPercent, formatUSD } from "@/lib/format";
-import { useSelectedMarketInfo } from "@/lib/hyperliquid";
+import { chartSymbolFromMarket, useSelectedMarketInfo } from "@/lib/hyperliquid";
 import { createLazyComponent } from "@/lib/lazy";
 import { toBig } from "@/lib/trade/numbers";
 import { getValueColorClass } from "@/lib/ui/value-color";
@@ -17,6 +17,9 @@ import { TokenSelector } from "../chart/token-selector";
 import { MobileBottomNavSpacer } from "./mobile-bottom-nav";
 
 const KlineChart = createLazyComponent(() => import("../chart/kline-chart"), "KlineChart");
+const TradingViewChart = createLazyComponent(() => import("../chart/tradingview-chart"), "TradingViewChart");
+
+type ChartType = "default" | "tradingview";
 
 const overviewText = UI_TEXT.MARKET_OVERVIEW;
 
@@ -26,6 +29,10 @@ interface MobileChartViewProps {
 
 export function MobileChartView({ className }: MobileChartViewProps) {
 	const theme = useTheme();
+	// TradingView is the default canvas on mobile too (desktop parity: natively
+	// touch-capable axis zoom/drag, labels, drawing tools); the original klinecharts
+	// canvas stays as the automatic fallback if the widget fails to load.
+	const [chartType, setChartType] = useState<ChartType>("tradingview");
 	const { data: selectedMarket, isLoading } = useSelectedMarketInfo();
 	const { scope } = useExchangeScope();
 	const { setSelectedMarket } = useMarketActions();
@@ -106,14 +113,23 @@ export function MobileChartView({ className }: MobileChartViewProps) {
 					}
 				>
 					<Suspense fallback={<ChartSkeleton />}>
-						{selectedMarket && (
-							<KlineChart
-								symbol={selectedMarket.name}
-								positionDex={getPositionDex(selectedMarket)}
-								theme={theme === "dark" ? "dark" : "light"}
-								yAxisInside
-							/>
-						)}
+						{selectedMarket &&
+							(chartType === "tradingview" ? (
+								<TradingViewChart
+									symbol={chartSymbolFromMarket(selectedMarket.name, getPositionDex(selectedMarket))}
+									positionDex={getPositionDex(selectedMarket)}
+									theme={theme === "dark" ? "dark" : "light"}
+									onSwitchToDefault={() => setChartType("default")}
+									onLoadError={() => setChartType("default")}
+								/>
+							) : (
+								<KlineChart
+									symbol={chartSymbolFromMarket(selectedMarket.name, getPositionDex(selectedMarket))}
+									positionDex={getPositionDex(selectedMarket)}
+									theme={theme === "dark" ? "dark" : "light"}
+									yAxisInside
+								/>
+							))}
 					</Suspense>
 				</ClientOnly>
 			</div>

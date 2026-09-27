@@ -25,6 +25,7 @@ const OTHER_USER_ADDRESS = "0x2222222222222222222222222222222222222222" as const
 const AGENT_PRIVATE_KEY = `0x${"ab".repeat(32)}` as const;
 
 const testState = vi.hoisted(() => ({
+	writeAgentSessionAddress: vi.fn(),
 	address: undefined as string | undefined,
 	extraAgents: [] as Array<{ address: string; name: string; validUntil: number }>,
 	setAgent: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("@lingui/core/macro", () => ({
 
 vi.mock("@phosphor-icons/react", () => ({
 	CheckCircleIcon: Icon,
+	GithubLogoIcon: Icon,
 	CopyIcon: Icon,
 	DeviceMobileIcon: Icon,
 	KeyIcon: Icon,
@@ -117,6 +119,9 @@ vi.mock("wagmi", () => ({
 
 vi.mock("@/lib/hyperliquid", () => ({
 	useAgentWalletActions: () => ({ setAgent: testState.setAgent }),
+	// The route records which account the imported key trades so the app can run
+	// wallet-less afterwards.
+	writeAgentSessionAddress: testState.writeAgentSessionAddress,
 	useHyperliquid: () => ({
 		env: "Mainnet",
 		info: {
@@ -1000,6 +1005,10 @@ describe("MobileAgentSyncRoute", () => {
 		});
 		await flushAsyncWork(80);
 
+		// Registry miss gets a few short retries (Hyperliquid publishes an
+		// approval a moment after signing) before we call it unapproved.
+		await new Promise((resolve) => setTimeout(resolve, 4500));
+
 		expect(testState.setAgent).not.toHaveBeenCalled();
 		expect(container.textContent).toContain("Pairing code does not match this link.");
 		expect(window.sessionStorage.getItem(MOBILE_SYNC_DRAFT_STORAGE_KEY)).not.toBeNull();
@@ -1060,6 +1069,10 @@ describe("MobileAgentSyncRoute", () => {
 			importButton?.closest("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 		});
 		await flushAsyncWork(80);
+
+		// Registry miss gets a few short retries (Hyperliquid publishes an
+		// approval a moment after signing) before we call it unapproved.
+		await new Promise((resolve) => setTimeout(resolve, 4500));
 
 		expect(testState.setAgent).not.toHaveBeenCalled();
 		expect(container.textContent).toContain(expectedMessage);

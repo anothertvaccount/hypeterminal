@@ -30,6 +30,16 @@ export function getDexFromName(name: string): string | undefined {
 	return name.slice(0, separatorIdx);
 }
 
+/**
+ * Symbol the CHARTS must use for a market. HIP-3 builder perps (xyz:SP500) are
+ * not in the mainnet universe, so the bare coin cannot be resolved by the datafeed
+ * and the chart hangs waiting for a symbol — hence the qualified "dex:coin" form.
+ */
+export function chartSymbolFromMarket(name: string, dex?: string | undefined): string {
+	if (!dex || name.includes(BUILDER_DEX_SEPARATOR)) return name;
+	return `${dex}${BUILDER_DEX_SEPARATOR}${name}`;
+}
+
 export function getPerpDisplayName(name: string, quoteToken?: string): string {
 	return `${name}${PERP_MARKET_NAME_SEPARATOR}${quoteToken ?? DEFAULT_QUOTE_TOKEN}`;
 }

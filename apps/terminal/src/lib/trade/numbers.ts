@@ -81,7 +81,14 @@ export function floorToDecimals(value: number, maxDecimals: number): number {
 }
 
 export function formatDecimalFloor(value: Numeric, maxDecimals: number): string {
-	return floorToString(value, maxDecimals).replace(/\.?0+$/, "");
+	const text = floorToString(value, maxDecimals);
+	// Strip trailing zeros from the FRACTIONAL part only. A blanket /\.?0+$/ also
+	// eats the zeros of integers, so "100" became "1" and "2500" became "25" — which
+	// silently shrank every size ending in 0 on the 134 perps (DOGE, XRP, TRX, …)
+	// that use szDecimals 0, both on screen and in the order payload.
+	if (!text.includes(".")) return text;
+	const trimmed = text.replace(/\.?0+$/, "");
+	return trimmed === "" || trimmed === "-" ? "0" : trimmed;
 }
 
 export function limitDecimalInput(input: string, maxDecimals: number): string {

@@ -23,11 +23,16 @@ export const STORAGE_KEYS = {
 	META_CACHE: "hyperliquid-meta-cache-v2",
 	SIDEBAR_STATE: "sidebar_state-v2",
 	ORDER_ENTRY: "order-entry-v2",
+	TV_CHART: "tv-chart-v1",
 	LAST_MARK: "hl-last-mark-v1",
 	MARKETS_STATS: "hl-mkt-stats-v1",
 	RECENT_WALLETS: "hypeterminal:recent-wallets",
 	RQ_CACHE: "hl-rq-cache-v1",
 	LEGACY_METADATA: "hl-markets-meta-v1",
+	PAPER_TRADING: "hypeterminal:paper-trading-v1",
+	FILL_SOUND: "hypeterminal:fill-sound-v1",
+	CHASE_ORDERS: "hypeterminal:chase-orders-v1",
+	HOTKEYS: "hypeterminal:hotkeys-v1",
 } as const;
 
 export const RQ_CACHE_BUSTER = "v1";

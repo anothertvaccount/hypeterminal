@@ -1,9 +1,10 @@
 import { Button } from "@hypeterminal/ui";
 import { t } from "@lingui/core/macro";
-import { SpinnerGapIcon } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
+import { KeyboardIcon, SpinnerGapIcon } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
 import { useConnection, useSwitchChain, useWalletClient } from "wagmi";
 import { DEFAULT_QUOTE_TOKEN } from "@/config/app";
+import { PAPER_TRADE } from "@/config/paper";
 import { APPROVAL_ERROR_DISMISS_MS } from "@/config/time";
 import { getPositionDex } from "@/domain/market";
 import { getMarketQuoteToken } from "@/domain/trade/balances";
@@ -29,8 +30,9 @@ import {
 import type { ActiveModal } from "@/lib/trade/types";
 import { useButtonContent } from "@/lib/trade/use-button-content";
 import { perpInput, spotInput, useOrderValidation } from "@/lib/trade/use-order-validation";
-import { useDepositModalActions, useSettingsDialogActions, useSwapModalActions } from "@/stores/use-global-modal-store";
+import { useSettingsDialogActions, useSwapModalActions } from "@/stores/use-global-modal-store";
 import { useMarketOrderSlippageBps, useMarketOrderSlippagePercent } from "@/stores/use-global-settings-store";
+import { useHotkeySettingsActions } from "@/stores/use-hotkey-settings-store";
 import {
 	useLimitPrice,
 	useOrderEntryActions,
@@ -38,8 +40,10 @@ import {
 	useOrderSize,
 	useOrderType,
 	useReduceOnly,
+	useScaleAmountDist,
 	useScaleEnd,
 	useScaleLevels,
+	useScalePriceDist,
 	useScaleStart,
 	useSizeMode,
 	useSlPrice,
@@ -52,6 +56,7 @@ import {
 } from "@/stores/use-order-entry-store";
 import { getOrderbookActionsStore, useSelectedPrice } from "@/stores/use-orderbook-actions-store";
 import { WalletModal } from "../components/wallet-modal";
+import { ModeSwitch } from "../mode-switch";
 import { MarginModeModal } from "./margin-mode-modal";
 import { OrderSummary } from "./order-summary";
 import { OrderToast } from "./order-toast";
@@ -64,7 +69,7 @@ export function TradePanel() {
 	const { address, isConnected } = useConnection();
 	const { data: walletClient, isLoading: isWalletLoading, error: walletClientError } = useWalletClient();
 	const switchChain = useSwitchChain();
-	const needsChainSwitch = !!walletClientError && walletClientError.message.includes("does not match");
+	const needsChainSwitch = !PAPER_TRADE && !!walletClientError && walletClientError.message.includes("does not match");
 
 	const { data: market } = useSelectedMarketInfo();
 
@@ -73,6 +78,7 @@ export function TradePanel() {
 	const { isReady: isAgentReady, isLoading: isAgentLoading } = useAgentStatus();
 	const { register: registerAgent, status: registerStatus } = useAgentRegistration();
 	const { handleSubmit: submitOrder, isSubmitting } = useOrderSubmit();
+	const { setHelpOpen } = useHotkeySettingsActions();
 
 	const slippageBps = useMarketOrderSlippageBps();
 	const slippagePercent = useMarketOrderSlippagePercent();
@@ -116,6 +122,8 @@ export function TradePanel() {
 	const scaleStartPriceInput = useScaleStart();
 	const scaleEndPriceInput = useScaleEnd();
 	const scaleLevelsNum = useScaleLevels();
+	const scalePriceDist = useScalePriceDist();
+	const scaleAmountDist = useScaleAmountDist();
 	const twapMinutesNum = useTwapMinutes();
 	const twapRandomize = useTwapRandomize();
 	const tpSlEnabled = useTpSlEnabled();
@@ -136,7 +144,6 @@ export function TradePanel() {
 	const [approvalError, setApprovalError] = useState<string | null>(null);
 	const [activeModal, setActiveModal] = useState<ActiveModal>(null);
 
-	const { open: openDepositModal } = useDepositModalActions();
 	const { open: openSettingsDialog } = useSettingsDialogActions();
 	const { open: openSwapModal } = useSwapModalActions();
 
@@ -144,11 +151,32 @@ export function TradePanel() {
 
 	useEffect(() => {
 		if (selectedPrice !== null) {
-			setOrderType("limit");
+			setOrderType("limit", { price: Number(selectedPrice), szDecimals: market?.szDecimals ?? 0 });
 			setLimitPrice(String(selectedPrice));
 			getOrderbookActionsStore().actions.clearSelectedPrice();
 		}
-	}, [selectedPrice, setOrderType, setLimitPrice]);
+	}, [selectedPrice, setOrderType, setLimitPrice, market]);
+
+	// Refresh gap: orderType persists across reloads but size does not — while the
+	// form boots already on Limit with an empty size, seed the default limit size
+	// exactly once (after market data is available for base-mode conversion).
+	const seededDefaultSizeRef = useRef(false);
+	useEffect(() => {
+		if (orderType !== "limit" || seededDefaultSizeRef.current) return;
+		if (sizeInput.trim() !== "") {
+			seededDefaultSizeRef.current = true;
+			return;
+		}
+		if (sizeMode === "quote") {
+			seededDefaultSizeRef.current = true;
+			setOrderType("limit");
+			return;
+		}
+		const reference = toNumberOrZero(limitPriceInput) > 0 ? toNumberOrZero(limitPriceInput) : markPx;
+		if (!(reference > 0)) return;
+		seededDefaultSizeRef.current = true;
+		setOrderType("limit", { price: reference, szDecimals: market?.szDecimals ?? 0 });
+	}, [orderType, sizeInput, sizeMode, limitPriceInput, markPx, market, setOrderType]);
 
 	useEffect(() => {
 		if (isSpotMarket && triggerOrder) {
@@ -261,12 +289,20 @@ export function TradePanel() {
 		});
 	}
 
-	async function handleSubmit() {
-		if (!validation.canSubmit || isSubmitting) return;
+	async function handleSubmit(opts?: { force?: boolean }) {
+		// `force` (set by submitOrderForm for hotkey/chart-click gestures) skips only
+		// the in-flight guard: rapid chart-click spam each places its own order on
+		// live, while the manual button keeps its double-submit protection.
+		if (!validation.canSubmit || (isSubmitting && !opts?.force)) return;
 		if (!market || !baseToken || typeof market.assetId !== "number") return;
 
 		await submitOrder({
-			market: { assetId: market.assetId, szDecimals: market.szDecimals },
+			market: {
+				assetId: market.assetId,
+				szDecimals: market.szDecimals,
+				coin: market.name,
+				dex: getPositionDex(market),
+			},
 			baseToken,
 			side,
 			orderType,
@@ -276,11 +312,15 @@ export function TradePanel() {
 			slippageBps,
 			reduceOnly,
 			tif,
+			leverage,
+			marginMode,
 			limitPriceInput,
 			triggerPriceInput,
 			scaleStartPriceInput,
 			scaleEndPriceInput,
 			scaleLevelsNum,
+			scalePriceDist,
+			scaleAmountDist,
 			twapMinutesNum,
 			twapRandomize,
 			tpSlEnabled,
@@ -307,7 +347,6 @@ export function TradePanel() {
 		sideLabel: sideLabels[side],
 		isSubmitting,
 		onConnectWallet: () => setActiveModal("wallet"),
-		onDeposit: () => openDepositModal("deposit"),
 		onRegister: handleRegister,
 		onSubmit: handleSubmit,
 	});
@@ -379,13 +418,45 @@ export function TradePanel() {
 				onApply={handleMarginApply}
 			/>
 
-			<div className="flex flex-col gap-5 px-3 py-3">
+			<form
+				data-order-form
+				onSubmit={(event) => {
+					event.preventDefault();
+					const formEl = event.currentTarget;
+					const force = formEl.dataset.hlForceSubmit === "1";
+					delete formEl.dataset.hlForceSubmit;
+					void handleSubmit({ force });
+				}}
+				className="flex flex-col gap-5 px-3 py-3"
+			>
+				<div className="flex items-start justify-between gap-2">
+					<ModeSwitch />
+					<button
+						type="button"
+						aria-label="Keyboard shortcuts"
+						title="Keyboard shortcuts (?)"
+						onClick={() => setHelpOpen(true)}
+						className="p-1.5 rounded-xs text-fg-muted hover:text-fg transition-colors cursor-pointer"
+					>
+						<KeyboardIcon className="size-4" />
+					</button>
+				</div>
 				<TradeHeader
 					orderType={orderType}
 					side={side}
 					sideLabels={sideLabels}
 					marketKind={market?.kind}
-					onOrderTypeChange={setOrderType}
+					onOrderTypeChange={(type) =>
+						setOrderType(
+							type,
+							type === "limit"
+								? {
+										price: toNumberOrZero(limitPriceInput) > 0 ? toNumberOrZero(limitPriceInput) : markPx,
+										szDecimals: market?.szDecimals ?? 0,
+									}
+								: undefined,
+						)
+					}
 					onSideChange={setSide}
 					marginMode={marginMode}
 					leverage={leverage}
@@ -399,7 +470,6 @@ export function TradePanel() {
 					swapTargetToken={swapTargetToken}
 					onSizeModeToggle={handleSizeModeToggle}
 					onSizePercentApply={handleSizePercentApply}
-					onDepositClick={() => openDepositModal("deposit")}
 					onSwapClick={() => swapTargetToken && openSwapModal(DEFAULT_QUOTE_TOKEN, swapTargetToken)}
 				/>
 
@@ -429,7 +499,7 @@ export function TradePanel() {
 				</div>
 
 				{renderSummary()}
-			</div>
+			</form>
 
 			<WalletModal open={activeModal === "wallet"} onOpenChange={(open) => setActiveModal(open ? "wallet" : null)} />
 

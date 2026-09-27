@@ -25,6 +25,9 @@ function createManualChunks(id: string) {
 }
 
 const config = defineConfig({
+  // Subpath deploys (e.g. https://host/terminal/) set VITE_BASE_PATH at BUILD
+  // time only — dev stays at '/' since the var lives only in the build command.
+  base: process.env.VITE_BASE_PATH || '/',
   server: {
     strictPort: false,
   },

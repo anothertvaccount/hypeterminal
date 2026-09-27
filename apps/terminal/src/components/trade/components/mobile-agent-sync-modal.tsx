@@ -15,9 +15,11 @@ import {
 import { t } from "@lingui/core/macro";
 import { Trans } from "@lingui/react/macro";
 import {
+	CaretDownIcon,
 	CheckIcon,
 	CopyIcon,
 	DeviceMobileIcon,
+	GithubLogoIcon,
 	KeyIcon,
 	QrCodeIcon,
 	ShieldCheckIcon,
@@ -26,7 +28,10 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useConnection } from "wagmi";
+import { GITHUB_URL } from "@/config/app";
+import { PAPER_TRADE } from "@/config/paper";
 import { useCopyToClipboard } from "@/hooks/ui/use-copy-to-clipboard";
+import { cn } from "@/lib/cn";
 import { shortenAddress } from "@/lib/format";
 import { useAgentWalletActions, useAgentWalletStorage, useExchange, useHyperliquid } from "@/lib/hyperliquid";
 import { createMobileAgentSyncUrl } from "@/lib/mobile-sync/sync-core";
@@ -156,15 +161,23 @@ export function MobileAgentSyncModal({ open, onOpenChange }: MobileAgentSyncModa
 		setSyncState({ status: "approving" });
 
 		try {
-			await approveAgent.mutateAsync({
-				agentAddress: approval.publicKey,
-				agentName: approval.agentName,
-			});
+			// Preview mode never signs: the phone trades with simulated funds anyway,
+			// so skip the on-chain agent approval (mirrors useAgentStatus in paper).
+			if (!PAPER_TRADE) {
+				await approveAgent.mutateAsync({
+					agentAddress: approval.publicKey,
+					agentName: approval.agentName,
+				});
+			}
 			setSyncState({ status: "creating" });
 
 			const syncCreatedAtMs = Date.now();
 			const syncUrl = await createMobileAgentSyncUrl({
 				appOrigin: window.location.origin,
+				// Follow vite's base so the link lands on the app under subpath deploys
+				// (https://host/terminal/mobile-agent-sync) and at the root otherwise.
+				routePath: `${import.meta.env.BASE_URL}mobile-agent-sync`,
+				preview: PAPER_TRADE,
 				env,
 				userAddress: address,
 				agentPrivateKey: approval.privateKey,
@@ -199,10 +212,14 @@ export function MobileAgentSyncModal({ open, onOpenChange }: MobileAgentSyncModa
 		setResetState({ status: "resetting" });
 
 		try {
-			await approveAgent.mutateAsync({
-				agentAddress: revocation.publicKey,
-				agentName: revocation.agentName,
-			});
+			// Preview mode never signs (see handleCreateSync) — clearing the local
+			// agent state is all a "reset" can mean without a wallet signature.
+			if (!PAPER_TRADE) {
+				await approveAgent.mutateAsync({
+					agentAddress: revocation.publicKey,
+					agentName: revocation.agentName,
+				});
+			}
 			if (isStoredMobileAgent(localAgent)) {
 				clearAgent(env, address);
 			}
@@ -222,6 +239,13 @@ export function MobileAgentSyncModal({ open, onOpenChange }: MobileAgentSyncModa
 		}
 	}
 
+	// A link created on localhost points a phone at THIS machine — unreachable
+	// from any other device. Say so instead of letting the QR look broken.
+	const isLocalHost =
+		typeof window !== "undefined" &&
+		(window.location.hostname === "localhost" ||
+			window.location.hostname === "127.0.0.1" ||
+			window.location.hostname === "[::1]");
 	const isPending = syncState.status === "approving" || syncState.status === "creating";
 	const isReady = syncState.status === "ready";
 	const isLinkExpired = syncState.status === "link-expired";
@@ -265,6 +289,18 @@ export function MobileAgentSyncModal({ open, onOpenChange }: MobileAgentSyncModa
 					>
 						<WarningCircleIcon className="mt-0.5 size-4 shrink-0" weight="fill" aria-hidden />
 						<p>{syncState.message}</p>
+					</div>
+				)}
+
+				{isLocalHost && (
+					<div className="flex items-start gap-2 rounded-8 border border-stroke-warning-strong/25 bg-warning-soft p-3 text-xs">
+						<WarningCircleIcon className="mt-0.5 size-4 shrink-0 text-warning" weight="fill" aria-hidden />
+						<p className="text-warning">
+							<Trans>
+								You're running on localhost — a phone cannot reach this address. Open the deployed site in your browser
+								first, then create the phone link there.
+							</Trans>
+						</p>
 					</div>
 				)}
 
@@ -384,6 +420,7 @@ function ReadySyncPanel({
 					</p>
 				</div>
 			</div>
+			<LinkSecurityExplainer agentExpiresLabel={agentExpiresLabel} />
 
 			<div className="rounded-8 border border-stroke-weak bg-fill-weak p-3">
 				<div className="flex items-center justify-between gap-3">
@@ -421,6 +458,10 @@ function ReadySyncPanel({
 						</p>
 					</div>
 				</div>
+
+				<p className="mt-2 break-all rounded-xs bg-fill-weak px-2 py-1.5 font-mono text-2xs text-fg-muted select-all">
+					{state.url}
+				</p>
 
 				{showQr && (
 					<div className="mt-3 flex justify-center rounded-8 border border-stroke-weak bg-white p-3">
@@ -573,6 +614,80 @@ function ResetMobileAccessPanel({
 				>
 					<WarningCircleIcon className="mt-0.5 size-3.5 shrink-0" weight="fill" aria-hidden />
 					<p>{state.message}</p>
+				</div>
+			)}
+		</div>
+	);
+}
+
+/**
+ * Plain-language security explainer for the Phone Access flow. The user is being
+ * asked to move a trading key onto a phone with no wallet, so the flow states what
+ * is encrypted, what is sent where, how long it lasts and how to undo it — rather
+ * than asking for trust.
+ */
+function LinkSecurityExplainer({ agentExpiresLabel }: { agentExpiresLabel: string }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<div className="rounded-8 border border-stroke-weak bg-fill-weak">
+			<button
+				type="button"
+				aria-expanded={open}
+				onClick={() => setOpen((value) => !value)}
+				className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+			>
+				<span className="flex min-w-0 items-center gap-2">
+					<ShieldCheckIcon className="size-4 shrink-0 text-icon" aria-hidden />
+					<span className="text-xs font-semibold text-fg">
+						<Trans>How this link is protected</Trans>
+					</span>
+				</span>
+				<CaretDownIcon
+					className={cn("size-4 shrink-0 text-fg-muted transition-transform", open && "rotate-180")}
+					aria-hidden
+				/>
+			</button>
+			{open && (
+				<div className="space-y-2 border-t border-stroke-weak px-3 py-2.5 text-2xs leading-relaxed text-fg-muted">
+					<p>
+						<Trans>
+							The link carries a freshly generated trading key. It is encrypted with AES-GCM, and the encryption key is
+							derived from the pairing code with PBKDF2 (310,000 iterations) and a random salt. Without the code, the
+							link cannot be read.
+						</Trans>
+					</p>
+					<p>
+						<Trans>
+							The encrypted data sits after the # in the URL. Browsers never send that part to a web server, and this
+							site is static — there is no backend that could store your key, and nothing about your key is uploaded
+							here. The only thing sent anywhere is your account address, to Hyperliquid's public API, to check the key
+							is approved.
+						</Trans>{" "}
+						<a
+							href={GITHUB_URL}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stroke-focus"
+						>
+							<GithubLogoIcon className="size-3" aria-hidden />
+							<Trans>
+								Open source — browse the repository: there is no server-side code here that could hold your key.
+							</Trans>
+						</a>
+					</p>
+					<p>
+						<Trans>
+							The code stops working after 10 minutes. The key can keep trading until {agentExpiresLabel} (30 days from
+							approval), and it can place orders but never withdraw.
+						</Trans>
+					</p>
+					<p>
+						<Trans>
+							On the phone the key is stored in that browser only. "Forget this key" clears it from the phone; "Reset
+							phone access" here revokes it everywhere at once. Anyone holding both the link and the code can trade this
+							account, so treat them like a password.
+						</Trans>
+					</p>
 				</div>
 			)}
 		</div>

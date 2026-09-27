@@ -1,16 +1,25 @@
 import { Dropdown } from "@hypeterminal/ui";
 import { t } from "@lingui/core/macro";
-import { ArrowsClockwiseIcon, LightningIcon, TagIcon } from "@phosphor-icons/react";
+import { ArrowsClockwiseIcon, LightningIcon, TagIcon, TimerIcon } from "@phosphor-icons/react";
 
 interface Props {
 	canClose: boolean;
 	isRowClosing: boolean;
 	onMarketClose: () => void;
 	onLimitClose: () => void;
+	/** Post-only chase close — keeps riding the touch until the position is flat. */
+	onChaseClose: () => void;
 	onReverse: () => void;
 }
 
-export function PositionActionsDropdown({ canClose, isRowClosing, onMarketClose, onLimitClose, onReverse }: Props) {
+export function PositionActionsDropdown({
+	canClose,
+	isRowClosing,
+	onMarketClose,
+	onLimitClose,
+	onChaseClose,
+	onReverse,
+}: Props) {
 	return (
 		<Dropdown
 			className="flex justify-end text-xs text-fg-muted"
@@ -32,6 +41,11 @@ export function PositionActionsDropdown({ canClose, isRowClosing, onMarketClose,
 							label: t`Limit Close`,
 							icon: <TagIcon className="size-3.5" />,
 							onSelect: onLimitClose,
+						},
+						{
+							label: t`Chase Close`,
+							icon: <TimerIcon className="size-3.5" />,
+							onSelect: onChaseClose,
 						},
 					],
 				},

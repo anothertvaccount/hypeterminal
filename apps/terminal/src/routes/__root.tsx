@@ -31,7 +31,11 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 function RootComponent() {
 	useEffect(() => {
 		if ("serviceWorker" in navigator) {
-			navigator.serviceWorker.register("/sw.js", { scope: "/" });
+			// BASE_URL follows vite's base so the worker registers under subpath
+			// deploys (/terminal/sw.js scoped to /terminal/) and at the root otherwise.
+			navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, {
+				scope: import.meta.env.BASE_URL,
+			});
 		}
 	}, []);
 

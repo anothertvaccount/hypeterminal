@@ -1,6 +1,4 @@
-import { Button } from "@hypeterminal/ui";
 import { t } from "@lingui/core/macro";
-import { ArrowsLeftRightIcon, DownloadSimpleIcon, UploadSimpleIcon } from "@phosphor-icons/react";
 import { useConnection } from "wagmi";
 import { InfoRow, InfoRowGroup } from "@/components/ui/info-row";
 import { DEFAULT_QUOTE_TOKEN, FALLBACK_VALUE_PLACEHOLDER } from "@/config/app";
@@ -10,7 +8,6 @@ import { cn } from "@/lib/cn";
 import { formatPercent, formatUSD } from "@/lib/format";
 import { toNumberOrZero } from "@/lib/trade/numbers";
 import { getValueColorClass } from "@/lib/ui/value-color";
-import { useDepositModalActions } from "@/stores/use-global-modal-store";
 
 type SummaryRow = {
 	label: string;
@@ -19,7 +16,6 @@ type SummaryRow = {
 };
 
 export function AccountPanel() {
-	const { open: openDepositModal } = useDepositModalActions();
 	const { isConnected } = useConnection();
 	const {
 		marginSummary,
@@ -78,7 +74,6 @@ export function AccountPanel() {
 	}
 
 	const hasPerpData = isConnected && perpMetrics !== null;
-	const hasSpotData = isConnected && spotMetrics !== null;
 
 	const perpRows: SummaryRow[] = perpMetrics
 		? [
@@ -143,38 +138,6 @@ export function AccountPanel() {
 								))}
 							</InfoRowGroup>
 						</>
-					)}
-
-					{(hasPerpData || hasSpotData) && (
-						<div className="grid grid-cols-3 gap-1 mt-4">
-							<Button
-								variant="outline"
-								intent="neutral"
-								onClick={() => openDepositModal("withdraw")}
-								aria-label={t`Withdraw`}
-								iconLeft={<UploadSimpleIcon className="size-4" />}
-							>
-								{t`Withdraw`}
-							</Button>
-							<Button
-								variant="outline"
-								intent="neutral"
-								onClick={() => openDepositModal("deposit")}
-								aria-label={t`Deposit`}
-								iconLeft={<DownloadSimpleIcon className="size-4" />}
-							>
-								{t`Deposit`}
-							</Button>
-							<Button
-								variant="outline"
-								intent="neutral"
-								onClick={() => openDepositModal("bridge")}
-								aria-label={t`Bridge`}
-								iconLeft={<ArrowsLeftRightIcon className="size-4" />}
-							>
-								{t`Bridge`}
-							</Button>
-						</div>
 					)}
 				</div>
 			)}

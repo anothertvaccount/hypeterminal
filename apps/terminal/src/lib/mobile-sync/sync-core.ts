@@ -87,6 +87,8 @@ export interface MobileAgentSyncPlaintext {
 	agentValidUntilMs: number;
 	createdAtMs: number;
 	expiresAtMs: number;
+	/** Set by preview builds (no on-chain agent approval exists for them). */
+	preview?: boolean;
 }
 
 export interface ImportedMobileAgent {
@@ -98,11 +100,15 @@ export interface ImportedMobileAgent {
 	agentName: string;
 	agentValidUntilMs: number;
 	importedAtMs: number;
+	preview?: boolean;
 	syncId: string;
 }
 
 export interface CreateMobileAgentSyncUrlInput {
 	appOrigin: string;
+	/** Preview builds never register the agent on Hyperliquid (no wallet signature);
+	 * the phone accepts this embedded marker instead of the on-chain registry. */
+	preview?: boolean;
 	env: HyperliquidEnvName;
 	userAddress: string;
 	agentPrivateKey: string;
@@ -162,6 +168,7 @@ export async function createMobileAgentSyncUrl(
 	const envelopeWithoutCiphertext = createEnvelopeWithoutCiphertext(nowMs, expiresAtMs, crypto);
 	const plaintext: MobileAgentSyncPlaintext = {
 		v: 1,
+		...(input.preview ? { preview: true } : {}),
 		type: MOBILE_SYNC_PLAINTEXT_TYPE,
 		syncId: envelopeWithoutCiphertext.syncId,
 		issuerOrigin: appOrigin,
@@ -383,6 +390,7 @@ export function validateMobileAgentSyncPlaintext(
 		agentValidUntilMs,
 		importedAtMs: nowMs,
 		syncId: envelope.syncId,
+		...(plaintext.preview === true ? { preview: true } : {}),
 	};
 }
 

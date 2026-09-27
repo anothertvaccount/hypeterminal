@@ -1,18 +1,27 @@
 import { CheckCircleIcon, InfoIcon, SpinnerGapIcon, WarningIcon, WarningOctagonIcon } from "@phosphor-icons/react";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 import { TOAST_DEFAULT_DURATION_MS } from "@/config/time";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useTheme } from "@/stores/use-global-settings-store";
 
 const TOAST_WIDTH = "20rem";
 
+/** Bottom nav height + safe area: toasts must clear it on a phone. */
+const MOBILE_NAV_CLEARANCE = "5.5rem";
+
 function Toaster(props: ToasterProps) {
 	const theme = useTheme();
+	const isMobile = useIsMobile();
 
 	return (
 		<Sonner
 			theme={theme as ToasterProps["theme"]}
 			className="toaster group"
-			position="bottom-right"
+			// On the phone the queue panel owns the top of the screen, so toasts go to
+			// the bottom — centred, and lifted clear of the fixed bottom nav.
+			position={isMobile ? "bottom-center" : "bottom-right"}
+			offset={isMobile ? MOBILE_NAV_CLEARANCE : undefined}
+			mobileOffset={isMobile ? MOBILE_NAV_CLEARANCE : undefined}
 			duration={TOAST_DEFAULT_DURATION_MS}
 			icons={{
 				success: <CheckCircleIcon className="size-4" />,

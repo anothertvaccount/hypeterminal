@@ -1,6 +1,6 @@
 import type { AllDexsClearinghouseStateWsEvent } from "@nktkas/hyperliquid";
-import { useConnection } from "wagmi";
 import { useSubscription } from "../hooks/useSubscription";
+import { useTradingSession } from "../signing/use-trading-session";
 
 type RawClearinghouseState = AllDexsClearinghouseStateWsEvent["clearinghouseStates"][number][1];
 type RawPosition = RawClearinghouseState["assetPositions"][number];
@@ -82,8 +82,9 @@ const EMPTY: UserPositions = {
 };
 
 export function useUserPositions(): UserPositions {
-	const { address, isConnected } = useConnection();
-	const enabled = isConnected && !!address;
+	// Not wagmi's `isConnected`: a phone linked through Phone Access trades an
+	// account with no wallet attached, and must still see its positions.
+	const { address, isActive: enabled } = useTradingSession();
 
 	const { data, status } = useSubscription("allDexsClearinghouseState", { user: address ?? "" }, { enabled });
 

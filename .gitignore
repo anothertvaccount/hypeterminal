@@ -13,6 +13,9 @@ coverage/
 *.tsbuildinfo
 *.tgz
 
+# Local dev server bookkeeping (scripts/with-dev-server.sh, local-servers.sh)
+.dev-server.pid
+
 # Logs and one-off scratch output
 *.log
 logs/
@@ -52,3 +55,11 @@ todos.json
 
 # Auto-generated boneyard skeleton registry (built from dev server)
 apps/terminal/src/bones/registry.ts
+
+# Browser-check debug screenshots and session handoff notes (scratch, not project files)
+/preview-*.png
+/probe-*.png
+/shot-*.png
+/settings.png
+/tv-left-state.png
+/HANDOFF-*.md

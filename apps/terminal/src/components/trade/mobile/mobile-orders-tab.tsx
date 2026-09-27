@@ -3,12 +3,13 @@ import { t } from "@lingui/core/macro";
 import { ListIcon, ListNumbersIcon, XIcon } from "@phosphor-icons/react";
 import { Skeleton } from "boneyard-js/react";
 import { useState } from "react";
-import { useConnection } from "wagmi";
 import { Spinner } from "@/components/ui/spinner";
 import { FALLBACK_VALUE_PLACEHOLDER, HL_ALL_DEXS } from "@/config/app";
+import { PAPER_TRADE } from "@/config/paper";
+import { usePaperFills } from "@/hooks/trade/use-paper-fills";
 import { cn } from "@/lib/cn";
 import { formatDateTime, formatPrice, formatToken } from "@/lib/format";
-import { useExchange, useMarkets, useSubscription } from "@/lib/hyperliquid";
+import { useExchange, useMarkets, useSubscription, useTradingSession } from "@/lib/hyperliquid";
 import type { MarketKind } from "@/lib/hyperliquid/markets";
 import {
 	getOrderTypeConfig,
@@ -22,6 +23,7 @@ import { useExchangeScope } from "@/providers/exchange-scope";
 import { useGlobalSettingsActions } from "@/stores/use-global-settings-store";
 import { useMarketActions } from "@/stores/use-market-store";
 import { useOrderEntryActions } from "@/stores/use-order-entry-store";
+import { usePaperActions, usePaperOpenOrderRows } from "@/stores/use-paper-store";
 import { AssetBadge } from "../components/asset-badge";
 import { MetricCell } from "./metric-cell";
 
@@ -32,7 +34,7 @@ interface Props {
 type CancelScope = "row" | "all";
 
 export function MobileOrdersTab({ className }: Props) {
-	const { address, isConnected } = useConnection();
+	const { address, isActive } = useTradingSession();
 	const { scope } = useExchangeScope();
 	const { setSelectedMarket } = useMarketActions();
 	const { setMobileActiveTab } = useGlobalSettingsActions();
@@ -52,18 +54,26 @@ export function MobileOrdersTab({ className }: Props) {
 	} = useSubscription(
 		"openOrders",
 		{ user: address ?? "0x0", dex: HL_ALL_DEXS },
-		{ enabled: isConnected && !!address },
+		{ enabled: !PAPER_TRADE && isActive },
 	);
 
 	const { mutate: cancelOrders, error: cancelError, reset: resetCancelError } = useExchange("cancel");
+	const paperRows = usePaperOpenOrderRows();
+	const paperActions = usePaperActions();
+	usePaperFills();
 
 	const [cancellingOids, setCancellingOids] = useState<Set<number>>(() => new Set());
 	const [pendingScopes, setPendingScopes] = useState<Set<CancelScope>>(() => new Set());
 
-	const openOrders = openOrdersEvent?.orders ?? [];
+	const openOrders = PAPER_TRADE ? paperRows : (openOrdersEvent?.orders ?? []);
 
 	function handleCancel(ordersToCancel: OpenOrder[], nextScope: CancelScope) {
 		if (ordersToCancel.length === 0) return;
+
+		if (PAPER_TRADE) {
+			paperActions.cancelOrders(ordersToCancel.map((order) => order.oid));
+			return;
+		}
 
 		const fresh = ordersToCancel.filter((order) => !cancellingOids.has(order.oid));
 		if (fresh.length === 0) return;
@@ -116,18 +126,18 @@ export function MobileOrdersTab({ className }: Props) {
 		handleCancel(openOrders, "all");
 	}
 
-	const headerCount = isConnected ? openOrders.length : FALLBACK_VALUE_PLACEHOLDER;
+	const headerCount = PAPER_TRADE || isActive ? openOrders.length : FALLBACK_VALUE_PLACEHOLDER;
 	const actionError = cancelError?.message;
 
-	if (!isConnected) {
+	if (!PAPER_TRADE && !isActive) {
 		return (
 			<div className="flex-1 flex items-center justify-center p-6 text-sm text-fg-muted">
-				{t`Connect your wallet to view open orders.`}
+				{t`Connect your wallet or link a trading key to view open orders.`}
 			</div>
 		);
 	}
 
-	if (status === "error") {
+	if (!PAPER_TRADE && status === "error") {
 		return (
 			<div className="flex-1 flex items-center justify-center p-6 text-sm text-error">
 				<span>{t`Failed to load open orders.`}</span>
@@ -136,7 +146,7 @@ export function MobileOrdersTab({ className }: Props) {
 		);
 	}
 
-	if (status === "active" && openOrders.length === 0) {
+	if ((PAPER_TRADE || status === "active") && openOrders.length === 0) {
 		return (
 			<div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center">
 				<div className="size-12 rounded-full flex items-center justify-center bg-surface">
@@ -148,7 +158,7 @@ export function MobileOrdersTab({ className }: Props) {
 	}
 
 	return (
-		<Skeleton name="orders-tab" loading={status === "subscribing" || status === "idle"}>
+		<Skeleton name="orders-tab" loading={!PAPER_TRADE && (status === "subscribing" || status === "idle")}>
 			<div className={cn("flex-1 min-h-0 flex flex-col", className)}>
 				<div className="px-3 py-2 flex items-center gap-2 text-xs uppercase text-fg-muted">
 					<ListNumbersIcon className="size-3" />

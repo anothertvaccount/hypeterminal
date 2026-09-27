@@ -3,7 +3,6 @@ import { t } from "@lingui/core/macro";
 import { ArrowsDownUpIcon, ArrowsLeftRightIcon, PaperPlaneTiltIcon, WalletIcon } from "@phosphor-icons/react";
 import { Skeleton } from "boneyard-js/react";
 import { useMemo, useState } from "react";
-import { useConnection } from "wagmi";
 import { DEFAULT_QUOTE_TOKEN, HL_ALL_DEXS } from "@/config/app";
 import { SMALL_BALANCE_THRESHOLD_USD } from "@/config/trade";
 import {
@@ -16,7 +15,7 @@ import {
 import { useDefaultDexBalances } from "@/hooks/trade/use-account-balances";
 import { cn } from "@/lib/cn";
 import { formatToken, formatUSD } from "@/lib/format";
-import { useSubscription } from "@/lib/hyperliquid";
+import { useSubscription, useTradingSession } from "@/lib/hyperliquid";
 import { useSpotTokens } from "@/lib/hyperliquid/markets/use-spot-tokens";
 import { toNumberOrZero } from "@/lib/trade/numbers";
 import { useSwapModalActions } from "@/stores/use-global-modal-store";
@@ -33,7 +32,7 @@ interface Props {
 }
 
 export function MobileBalancesTab({ className }: Props) {
-	const { isConnected } = useConnection();
+	const { isActive, isWallet } = useTradingSession();
 	const { getToken } = useSpotTokens();
 	const hideSmallBalances = useHideSmallBalances();
 	const { setHideSmallBalances } = useGlobalSettingsActions();
@@ -50,7 +49,7 @@ export function MobileBalancesTab({ className }: Props) {
 
 	const { perpSummary, spotBalances, spotAvailableAfterMaintenance, accountAbstraction, isLoading, hasError } =
 		useDefaultDexBalances();
-	const { data: allMidsEvent } = useSubscription("allMids", { dex: HL_ALL_DEXS }, { enabled: isConnected });
+	const { data: allMidsEvent } = useSubscription("allMids", { dex: HL_ALL_DEXS }, { enabled: isActive });
 	const mids = allMidsEvent?.mids;
 
 	const perpBalances = useMemo(
@@ -95,10 +94,10 @@ export function MobileBalancesTab({ className }: Props) {
 		setSendState({ open: true, asset: row.asset, accountType: row.type });
 	}
 
-	if (!isConnected) {
+	if (!isActive) {
 		return (
 			<div className="flex-1 flex items-center justify-center p-6 text-sm text-fg-muted">
-				{t`Connect your wallet to view balances.`}
+				{t`Connect your wallet or link a trading key to view balances.`}
 			</div>
 		);
 	}
@@ -122,9 +121,13 @@ export function MobileBalancesTab({ className }: Props) {
 	function renderBalanceCard(row: BalanceRow) {
 		const token = getToken(row.asset);
 		const decimals = row.type === "perp" ? 2 : (token?.szDecimals ?? 2);
-		const canTransfer = row.asset === DEFAULT_QUOTE_TOKEN && parseFloat(row.available) > 0;
+		// Transfer/Send are user-signed actions (usdClassTransfer/sendAsset) that an
+		// agent key cannot sign — a linked Phone Access session is trade-only, so
+		// don't offer buttons that can only fail. Swap and perp trading are L1
+		// actions and work fine.
+		const canTransfer = isWallet && row.asset === DEFAULT_QUOTE_TOKEN && parseFloat(row.available) > 0;
 		const canSwap = row.type === "spot" && parseFloat(row.available) > 0;
-		const canSend = parseFloat(row.available) > 0;
+		const canSend = isWallet && parseFloat(row.available) > 0;
 		const transferLabel = row.type === "perp" ? t`To Spot` : t`To Perp`;
 		const pnlData = getPnl(row);
 

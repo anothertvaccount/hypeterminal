@@ -90,22 +90,50 @@ describe("mobile sync import verification", () => {
 		).toThrow(MobileSyncImportError);
 	});
 
-	it("rejects remote approvals that do not match the exact imported mobile agent name and expiry", async () => {
+	// The exchange may normalise the agent name or round `validUntil`, so binding is
+	// on the agent ADDRESS plus a live window — a renamed/rounded approval is still
+	// the same real agent, and the sealed link already proves key possession.
+	it("accepts an approved agent whose name/expiry drifted, and rejects wrong or expired ones", async () => {
 		const { sync, imported } = await createImportedFixture();
+		const base = {
+			imported,
+			expectedEnv: "Mainnet" as const,
+			expectedUserAddress: USER_ADDRESS,
+			nowMs: NOW_MS,
+		};
 
-		expect(() =>
+		expect(
 			verifyImportedMobileAgent({
-				imported,
+				...base,
 				extraAgents: [
 					{
-						address: sync.agentAddress,
-						name: `${sync.agentName} stale`,
+						address: `0x${sync.agentAddress.slice(2).toUpperCase()}` as `0x${string}`,
+						name: `${sync.agentName} (renamed)`,
+						validUntil: NOW_MS + 1000,
+					},
+				],
+			}),
+		).toBeTruthy();
+
+		// a different agent address is never this link's agent
+		expect(() =>
+			verifyImportedMobileAgent({
+				...base,
+				extraAgents: [
+					{
+						address: "0x1111111111111111111111111111111111111111",
+						name: sync.agentName,
 						validUntil: sync.agentValidUntilMs,
 					},
 				],
-				expectedEnv: "Mainnet",
-				expectedUserAddress: USER_ADDRESS,
-				nowMs: NOW_MS,
+			}),
+		).toThrow(MobileSyncImportError);
+
+		// registered but expired → the trade window is gone
+		expect(() =>
+			verifyImportedMobileAgent({
+				...base,
+				extraAgents: [{ address: sync.agentAddress, name: sync.agentName, validUntil: NOW_MS - 1 }],
 			}),
 		).toThrow(MobileSyncImportError);
 	});

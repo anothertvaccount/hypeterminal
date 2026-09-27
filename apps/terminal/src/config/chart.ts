@@ -2,7 +2,9 @@ import type { CandleType } from "klinecharts";
 import type { ChartingLibraryFeatureset, ResolutionString, TimeFrameItem } from "@/types/charting_library";
 import { DEFAULT_QUOTE_TOKEN } from "./app";
 
-export const CHART_LIBRARY_PATH = "/charting_library/";
+// BASE_URL follows vite's `base` so the widget library resolves under subpath
+// deploys (e.g. /terminal/charting_library/) and at the root otherwise.
+export const CHART_LIBRARY_PATH = `${import.meta.env.BASE_URL}charting_library/`;
 
 export const CHART_TIME_FRAMES: TimeFrameItem[] = [
 	{ text: "5y", resolution: "1W" as ResolutionString, description: "5 Years" },
@@ -59,6 +61,11 @@ export const CHART_DISABLED_FEATURES = [
 	"display_market_status",
 	"popup_hints",
 	"header_saveload",
+	// The widget's fullscreen paints over the whole viewport: it hides the order
+	// form/positions and re-parents the chart away from our overlay layer, so the
+	// trading UI would vanish. Browser fullscreen (F11) still works if you want
+	// more room.
+	"header_fullscreen_button",
 	"header_screenshot",
 	"volume_force_overlay",
 	"show_logo_on_all_charts",

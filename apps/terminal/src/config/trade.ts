@@ -15,6 +15,11 @@ export const ORDER_FEE_RATE_SPOT_TAKER = 0.0007;
 export const ORDER_FEE_RATE_SPOT_MAKER = 0.0004;
 export const ORDER_SIZE_PERCENT_STEPS = [25, 50, 75, 100] as const;
 export const SIZE_PERCENT_OPTIONS = [0, 25, 50, 75, 100] as const;
+
+/** Quick size chips above the slider — each click adds its USD amount to the size. */
+export const DEFAULT_SIZE_BUTTON_AMOUNTS = [5, 50, 100, 250, 500] as const;
+/** Default size prefilled when landing on the limit tab with an empty size (USD, editable in Settings). */
+export const DEFAULT_LIMIT_SIZE_USD = 100;
 export const ORDER_LEVERAGE_STEPS = [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 125, 150, 200] as const;
 
 /** Liquidation-distance safety multiplier applied to the 1/leverage price buffer. */
@@ -51,6 +56,7 @@ export const POSITIONS_TABS = [
 	{ value: "history", label: "Trade History" },
 	{ value: "funding", label: "Funding History" },
 	{ value: "orders-history", label: "Order History" },
+	{ value: "chase", label: "Chase" },
 ] as const;
 
 export const MOBILE_POSITIONS_TABS = [
@@ -60,6 +66,7 @@ export const MOBILE_POSITIONS_TABS = [
 	{ value: "twap", label: "TWAP" },
 	{ value: "history", label: "Trades" },
 	{ value: "orders-history", label: "Order Hist." },
+	{ value: "chase", label: "Chase" },
 	{ value: "funding", label: "Funding" },
 ] as const;
 
@@ -68,6 +75,7 @@ export type MobilePositionsTabValue = (typeof MOBILE_POSITIONS_TABS)[number]["va
 export const ORDER_TYPES = [
 	"market",
 	"limit",
+	"chaseLimit",
 	"stopMarket",
 	"stopLimit",
 	"takeProfitMarket",
@@ -92,6 +100,7 @@ export const TIF_OPTIONS: Record<"Gtc" | "Ioc" | "Alo", { label: string }> = {
 };
 
 export const ADVANCED_ORDER_TYPES: AdvancedOrderType[] = [
+	"chaseLimit",
 	"stopMarket",
 	"stopLimit",
 	"takeProfitMarket",
@@ -101,6 +110,7 @@ export const ADVANCED_ORDER_TYPES: AdvancedOrderType[] = [
 ];
 
 export const ADVANCED_ORDER_GROUPS: Record<AdvancedOrderType, AdvancedOrderGroup> = {
+	chaseLimit: "execution",
 	stopMarket: "trigger",
 	stopLimit: "trigger",
 	takeProfitMarket: "trigger",
@@ -115,3 +125,12 @@ export const OPEN_ORDER_TYPE_PREFIXES = {
 	takeProfit: "Take Profit",
 	stop: "Stop",
 } as const;
+
+/**
+ * A post-only chase prices off the real touch, so an empty book read can't fall
+ * back to the mark — it has to try again. One l2Book call on a phone can come
+ * back with no levels (cold subscription, rate limit), which used to fail the
+ * placement outright. Bounded so a submit never hangs.
+ */
+export const CHASE_BOOK_READ_ATTEMPTS = 3;
+export const CHASE_BOOK_READ_BACKOFF_MS = 300;

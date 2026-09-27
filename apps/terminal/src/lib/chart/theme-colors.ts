@@ -121,6 +121,9 @@ export function buildChartOverrides(): Record<string, string | number | boolean>
 	const crosshairColor = strokeWeakLayerRgba(colors.border, chartCrosshairAlpha);
 
 	return {
+		// Absolute price labels, never the percentage / indexed-to-100 variants.
+		"mainSeriesProperties.priceAxisProperties.percentage": false,
+		"mainSeriesProperties.priceAxisProperties.indexedTo100": false,
 		"paneProperties.background": bg,
 		"paneProperties.backgroundType": "solid",
 		"paneProperties.vertGridProperties.color": gridColor,
@@ -283,7 +286,7 @@ async function fetchStaticCss(): Promise<string> {
 	if (staticCssCache) return staticCssCache;
 
 	try {
-		const response = await fetch("/tradingview-theme.css");
+		const response = await fetch(`${import.meta.env.BASE_URL}tradingview-theme.css`);
 		if (!response.ok) throw new Error("Failed to fetch CSS");
 		staticCssCache = await response.text();
 		return staticCssCache;

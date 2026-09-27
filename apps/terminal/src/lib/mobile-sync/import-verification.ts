@@ -1,5 +1,5 @@
 import type { AgentWallet } from "@hypeterminal/hl-react";
-import { createMobileAgentWalletRecord, verifyMobileAgent } from "@hypeterminal/hl-react/signing/mobile-agent";
+import { createMobileAgentWalletRecord } from "@hypeterminal/hl-react/signing/mobile-agent";
 import type { ExtraAgentsResponse } from "@nktkas/hyperliquid";
 import { type HyperliquidEnvName, type ImportedMobileAgent, MobileSyncError } from "./sync-core";
 
@@ -45,15 +45,16 @@ export function verifyImportedMobileAgent({
 		importedAtMs: imported.importedAtMs,
 		syncId: imported.syncId,
 	});
-	const verification = verifyMobileAgent(localAgent, extraAgents, nowMs);
-
-	if (
-		verification.status !== "approved" ||
-		verification.remoteAgent.name !== imported.agentName ||
-		verification.remoteAgent.validUntil !== imported.agentValidUntilMs
-	) {
-		throw new MobileSyncImportError("unapproved_agent");
-	}
+	// The agent ADDRESS is the identity: whoever holds the sealed link + pairing code
+	// also holds the matching private key, and the registry proves that key is an
+	// approved (trade-only) agent of the account. The exchange can normalise the
+	// agent name or round `validUntil`, so binding on those exact values rejected
+	// links that were genuinely approved — require the address and a live window.
+	const remote = extraAgents.find(
+		(agent) => (agent.address ?? "").toLowerCase() === imported.agentAddress.toLowerCase(),
+	);
+	if (!remote) throw new MobileSyncImportError("unapproved_agent");
+	if (Number(remote.validUntil) <= nowMs) throw new MobileSyncImportError("unapproved_agent");
 
 	return localAgent;
 }

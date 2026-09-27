@@ -9,9 +9,10 @@ import { PriceInput } from "@/components/ui/price-input";
 import { FALLBACK_VALUE_PLACEHOLDER } from "@/config/app";
 import { ORDER_MIN_NOTIONAL_USD, SIZE_PERCENT_OPTIONS } from "@/config/trade";
 import { getSliderValue } from "@/domain/trade/order/size";
+import { increaseSizeByUsd } from "@/domain/trade/order/size-steps";
 import { useOrderEntryData } from "@/hooks/trade/use-order-entry-data";
 import { cn } from "@/lib/cn";
-import { formatToken } from "@/lib/format";
+import { formatToken, szDecimalsToPriceDecimals } from "@/lib/format";
 import { useSelectedMarketInfo } from "@/lib/hyperliquid";
 import { formatDecimalFloor, isPositive, toNumber, toNumberOrZero } from "@/lib/trade/numbers";
 import {
@@ -23,6 +24,7 @@ import {
 	usesTriggerPrice as usesTriggerPriceForOrder,
 } from "@/lib/trade/order-types";
 import { getValueColorClass } from "@/lib/ui/value-color";
+import { useSizeButtonAmounts } from "@/stores/use-global-settings-store";
 import {
 	useLimitPrice,
 	useOrderEntryActions,
@@ -45,7 +47,6 @@ interface Props {
 	swapTargetToken: string | null;
 	onSizeModeToggle: () => void;
 	onSizePercentApply: (pct: number) => void;
-	onDepositClick: () => void;
 	onSwapClick: () => void;
 }
 
@@ -55,7 +56,6 @@ export function TradeFormFields({
 	swapTargetToken,
 	onSizeModeToggle,
 	onSizePercentApply,
-	onDepositClick,
 	onSwapClick,
 }: Props) {
 	const sizeFieldId = useId();
@@ -92,6 +92,15 @@ export function TradeFormFields({
 	const { setSize, setLimitPrice, setTriggerPrice, setReduceOnly, setTpSlEnabled } = useOrderEntryActions();
 
 	const isFormDisabled = !isConnected || availableBalance <= 0;
+	const sizeButtonAmounts = useSizeButtonAmounts();
+
+	function handleAddSize(amountUsd: number) {
+		// Quote mode: the field IS USD — using orderValue here would double-round through
+		// base precision. Base mode: orderValue (size × price) is the USD equivalent.
+		const currentUsd = sizeMode === "quote" ? toNumberOrZero(sizeInput) : orderValue;
+		const next = increaseSizeByUsd({ currentUsd, amountUsd, markPx, sizeMode, szDecimals, maxSize });
+		if (next !== null) setSize(next);
+	}
 
 	const triggerOrder = isTriggerOrderType(orderType);
 	const twapOrder = isTwapOrderType(orderType);
@@ -99,7 +108,9 @@ export function TradeFormFields({
 	const usesLimitPrice = usesLimitPriceForOrder(orderType);
 	const usesTriggerPrice = usesTriggerPriceForOrder(orderType);
 	const canUseTpSl = canUseTpSlForOrder(orderType);
-	const showTif = orderType === "limit" || orderType === "scale";
+	// chaseLimit shows the row: post-only (Alo, the default) is priced from the
+	// book at submit so it never crosses; Gtc joins the touch and may fill ≤ it.
+	const showTif = orderType === "limit" || orderType === "scale" || orderType === "chaseLimit";
 
 	const triggerPriceNum = toNumber(triggerPriceInput);
 	const sizeHasError = (sizeValue > maxSize && maxSize > 0) || (orderValue > 0 && orderValue < ORDER_MIN_NOTIONAL_USD);
@@ -141,11 +152,6 @@ export function TradeFormFields({
 									{t`Swap`}
 								</Button>
 							) : null}
-							{isConnected && availableBalance <= 0 ? (
-								<Button variant="link" intent="brand" size="xxs" onClick={onDepositClick}>
-									{t`Deposit`}
-								</Button>
-							) : null}
 						</div>
 					</div>
 					{!isSpotMarket && positionSize !== 0 ? (
@@ -183,7 +189,7 @@ export function TradeFormFields({
 					</div>
 				)}
 
-				{usesLimitPrice && (
+				{usesLimitPrice && orderType !== "chaseLimit" && (
 					<div className="border-t border-stroke-weak pt-3">
 						<PriceInput
 							label={t`Limit Price`}
@@ -244,6 +250,34 @@ export function TradeFormFields({
 							{sizeModeLabel}
 						</Button>
 					</div>
+
+					{!isSpotMarket && (
+						<div className="mb-2 flex flex-wrap items-center gap-1">
+							{sizeButtonAmounts.map((amount) => (
+								<button
+									key={`size-${amount}`}
+									type="button"
+									title={t`Add ${amount} USD to size`}
+									aria-label={t`Add ${amount} USD to size`}
+									disabled={isFormDisabled}
+									onClick={() => handleAddSize(amount)}
+									className="px-2 py-0.5 rounded-xs border border-stroke-weak bg-fill-hover text-2xs text-fg tabular-nums hover:bg-fill-hover/70 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+								>
+									{`$${amount}`}
+								</button>
+							))}
+							<button
+								type="button"
+								title={t`Clear size`}
+								aria-label={t`Clear size`}
+								disabled={isFormDisabled}
+								onClick={() => setSize("")}
+								className="ml-auto px-2 py-0.5 rounded-xs border border-stroke-weak bg-fill-hover text-2xs text-fg-muted hover:text-fg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+							>
+								CC
+							</button>
+						</div>
+					)}
 					<Slider
 						value={[sliderValue]}
 						onValueChange={(v) => {
@@ -296,7 +330,17 @@ export function TradeFormFields({
 							<Checkbox
 								aria-label={t`Take Profit / Stop Loss`}
 								checked={tpSlEnabled}
-								onCheckedChange={(checked) => setTpSlEnabled(checked === true)}
+								onCheckedChange={(checked) => {
+									const enabled = checked === true;
+									// Seed fresh ±2% off the reference (typed limit, else mark) so the
+									// TP/SL fields and their chart previews show something sensible.
+									setTpSlEnabled(
+										enabled,
+										enabled
+											? { base: price > 0 ? price : markPx, priceDecimals: szDecimalsToPriceDecimals(szDecimals) }
+											: undefined,
+									);
+								}}
 								disabled={isFormDisabled}
 								label={t`TP/SL`}
 							/>

@@ -9,10 +9,17 @@ export interface WalletInfo {
 	description: string;
 	popular?: boolean;
 	priority?: number;
+	/**
+	 * App/universal link that opens this wallet. WalletConnect sessions never
+	 * auto-foreground the wallet for a pending signature, so the UI offers a
+	 * one-tap "open the wallet app" instead of leaving people to switch by hand.
+	 */
+	deepLink?: string;
 }
 
 const rabby: WalletInfo = {
 	icon: RabbyIcon,
+	deepLink: "https://rabby.io",
 	description: "Multi-chain wallet with pre-sign checks",
 	popular: true,
 	priority: 1,
@@ -20,6 +27,7 @@ const rabby: WalletInfo = {
 
 const metaMask: WalletInfo = {
 	icon: MetaMaskIcon,
+	deepLink: "https://metamask.app.link",
 	description: "The most popular crypto wallet",
 	popular: true,
 	priority: 2,
@@ -27,6 +35,7 @@ const metaMask: WalletInfo = {
 
 const coinbase: WalletInfo = {
 	icon: CoinbaseIcon,
+	deepLink: "https://go.cb-w.com/dapp",
 	description: "Easy to use mobile & browser wallet",
 	popular: true,
 	priority: 3,
@@ -34,6 +43,8 @@ const coinbase: WalletInfo = {
 
 const walletConnect: WalletInfo = {
 	icon: WalletConnectIcon,
+	// While pairing, the app is opened through the live `wc:` URI instead.
+	deepLink: "https://walletconnect.com",
 	description: "Scan QR code with your mobile wallet",
 	popular: true,
 	priority: 4,

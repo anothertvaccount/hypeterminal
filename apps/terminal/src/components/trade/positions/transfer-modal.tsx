@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useConnection } from "wagmi";
 import { NumberInput } from "@/components/ui/number-input";
 import { DEFAULT_QUOTE_TOKEN } from "@/config/app";
+import { PAPER_MONEY_DISABLED_MESSAGE, PAPER_TRADE } from "@/config/paper";
 import { exceedsBalance, getTokenTransferDecimals, isAmountWithinBalance } from "@/domain/market";
 import { getNormalizedWithdrawable, getSpotAvailable, getSpotBalance } from "@/domain/trade/balances";
 import { useDefaultDexBalances } from "@/hooks/trade/use-account-balances";
@@ -74,6 +75,10 @@ function TransferModalBody({ onOpenChange, initialDirection }: BodyProps) {
 
 	async function handleTransfer() {
 		if (!isValidAmount || isPending || !address) return;
+		if (PAPER_TRADE) {
+			setError(PAPER_MONEY_DISABLED_MESSAGE);
+			return;
+		}
 
 		setError(null);
 		try {

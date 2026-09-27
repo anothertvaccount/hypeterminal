@@ -1,22 +1,13 @@
 import { Badge, Button, ButtonIcon, Divider, Drawer, DrawerContent } from "@hypeterminal/ui";
 import { Trans } from "@lingui/react/macro";
-import {
-	DownloadSimpleIcon,
-	GearIcon,
-	HammerIcon,
-	ListIcon,
-	TerminalIcon,
-	TrendUpIcon,
-	WalletIcon,
-	XIcon,
-} from "@phosphor-icons/react";
+import { GearIcon, HammerIcon, ListIcon, TerminalIcon, TrendUpIcon, WalletIcon, XIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { useConnection } from "wagmi";
 import { SCOPE_NAV_ITEMS, STATIC_NAV_ITEMS } from "@/config/nav";
 import { cn } from "@/lib/cn";
+import { useTradingSession } from "@/lib/hyperliquid";
 import { useExchangeScope } from "@/providers/exchange-scope";
-import { useDepositModalActions, useSettingsDialogActions } from "@/stores/use-global-modal-store";
+import { useSettingsDialogActions } from "@/stores/use-global-modal-store";
 import { WalletModal } from "../components/wallet-modal";
 import { ThemeToggle } from "../header/theme-toggle";
 
@@ -37,8 +28,8 @@ export function MobileNavDrawer() {
 	const [open, setOpen] = useState(false);
 	const [walletOpen, setWalletOpen] = useState(false);
 	const { scope } = useExchangeScope();
-	const { isConnected } = useConnection();
-	const { open: openDepositModal } = useDepositModalActions();
+	// A linked trading key is a session too — don't nag it to connect a wallet.
+	const { isActive } = useTradingSession();
 	const { open: openSettingsDialog } = useSettingsDialogActions();
 
 	function close() {
@@ -117,21 +108,7 @@ export function MobileNavDrawer() {
 					</div>
 
 					<div className="shrink-0 p-3 border-t border-stroke-weak/60 flex flex-col gap-2">
-						{isConnected ? (
-							<Button
-								variant="filled"
-								intent="brand"
-								size="sm"
-								onClick={() => {
-									openDepositModal("deposit");
-									close();
-								}}
-								iconLeft={<DownloadSimpleIcon className="size-3.5" />}
-								className="w-full"
-							>
-								<Trans>Deposit</Trans>
-							</Button>
-						) : (
+						{!isActive && (
 							<Button
 								variant="outline"
 								intent="neutral"

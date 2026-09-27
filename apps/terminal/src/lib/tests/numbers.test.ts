@@ -29,4 +29,19 @@ describe("trade numbers", () => {
 		expect(floorToDecimals(1.239, 2)).toBe(1.23);
 		expect(formatDecimalFloor(1.239, 2)).toBe("1.23");
 	});
+
+	it("keeps the zeros of integers (szDecimals 0 markets)", () => {
+		// Regression: a blanket trailing-zero strip turned 100 → "1" and 2500 → "25",
+		// so order sizes ending in 0 were sent 10×/100× too small on the 134 perps
+		// that use szDecimals 0 (DOGE, XRP, TRX, SEI, …).
+		expect(formatDecimalFloor(100, 0)).toBe("100");
+		expect(formatDecimalFloor(510, 0)).toBe("510");
+		expect(formatDecimalFloor(2500, 0)).toBe("2500");
+		expect(formatDecimalFloor(50, 0)).toBe("50");
+		expect(formatDecimalFloor(1020, 0)).toBe("1020");
+		// Fractions still lose their trailing zeros, and never come back empty.
+		expect(formatDecimalFloor(0.0006, 5)).toBe("0.0006");
+		expect(formatDecimalFloor(0.000004, 5)).toBe("0");
+		expect(formatDecimalFloor(1.2, 2)).toBe("1.2");
+	});
 });

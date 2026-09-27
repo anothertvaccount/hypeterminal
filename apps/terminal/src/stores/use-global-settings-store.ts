@@ -6,7 +6,9 @@ import { useShallow } from "zustand/react/shallow";
 import { STORAGE_KEYS } from "@/config/app";
 import { type LocaleCode, type NumberFormatLocale, resolveNumberFormatLocale } from "@/config/i18n";
 import {
+	DEFAULT_LIMIT_SIZE_USD,
 	DEFAULT_MARKET_ORDER_SLIPPAGE_PERCENT,
+	DEFAULT_SIZE_BUTTON_AMOUNTS,
 	MARKET_ORDER_SLIPPAGE_MAX_PERCENT,
 	MARKET_ORDER_SLIPPAGE_MIN_PERCENT,
 } from "@/config/trade";
@@ -26,6 +28,8 @@ const globalSettingsSchema = z.object({
 		marginMode: z.enum(["cross", "isolated"]).optional(),
 		positionsActiveTab: z.string().optional(),
 		mobileActiveTab: z.string().optional(),
+		sizeButtonAmounts: z.array(z.number()).optional(),
+		defaultLimitSizeUsd: z.number().optional(),
 		theme: z.enum(["dark", "light"]).optional(),
 		network: z.enum(["mainnet", "testnet"]).optional(),
 	}),
@@ -42,6 +46,8 @@ const DEFAULT_GLOBAL_SETTINGS = {
 	marginMode: "cross" as MarginMode,
 	positionsActiveTab: "positions",
 	mobileActiveTab: "chart",
+	sizeButtonAmounts: DEFAULT_SIZE_BUTTON_AMOUNTS,
+	defaultLimitSizeUsd: DEFAULT_LIMIT_SIZE_USD,
 	theme: "dark" as Theme,
 	network: "mainnet" as Network,
 } as const;
@@ -55,6 +61,10 @@ interface GlobalSettingsStore {
 	marginMode: MarginMode;
 	positionsActiveTab: string;
 	mobileActiveTab: string;
+	/** Quick size-chip amounts in USD (editable in Settings). */
+	sizeButtonAmounts: readonly number[];
+	/** Prefill for an empty size when landing on the limit tab, in USD (Settings). */
+	defaultLimitSizeUsd: number;
 	theme: Theme;
 	network: Network;
 	actions: {
@@ -66,12 +76,14 @@ interface GlobalSettingsStore {
 		setMarginMode: (mode: MarginMode) => void;
 		setPositionsActiveTab: (tab: string) => void;
 		setMobileActiveTab: (tab: string) => void;
+		setSizeButtonAmounts: (amounts: number[]) => void;
+		setDefaultLimitSizeUsd: (usd: number) => void;
 		setTheme: (theme: Theme) => void;
 		setNetwork: (network: Network) => void;
 	};
 }
 
-const useGlobalSettingsStore = create<GlobalSettingsStore>()(
+export const useGlobalSettingsStore = create<GlobalSettingsStore>()(
 	persist(
 		(set, get) => ({
 			...DEFAULT_GLOBAL_SETTINGS,
@@ -91,6 +103,13 @@ const useGlobalSettingsStore = create<GlobalSettingsStore>()(
 				setMarginMode: (mode) => set({ marginMode: mode }),
 				setPositionsActiveTab: (tab) => set({ positionsActiveTab: tab }),
 				setMobileActiveTab: (tab) => set({ mobileActiveTab: tab }),
+				setSizeButtonAmounts: (amounts) => {
+					const clean = amounts.filter((amount) => Number.isFinite(amount) && amount > 0);
+					if (clean.length > 0) set({ sizeButtonAmounts: [...new Set(clean)] });
+				},
+				setDefaultLimitSizeUsd: (usd) => {
+					if (Number.isFinite(usd) && usd > 0) set({ defaultLimitSizeUsd: usd });
+				},
 				setTheme: (theme) => set({ theme }),
 				setNetwork: (network) => {
 					set({ network });
@@ -111,6 +130,8 @@ const useGlobalSettingsStore = create<GlobalSettingsStore>()(
 				marginMode: state.marginMode,
 				positionsActiveTab: state.positionsActiveTab,
 				mobileActiveTab: state.mobileActiveTab,
+				sizeButtonAmounts: state.sizeButtonAmounts,
+				defaultLimitSizeUsd: state.defaultLimitSizeUsd,
 				theme: state.theme,
 				network: state.network,
 			}),
@@ -216,4 +237,17 @@ export function useNetwork() {
 
 export function useIsTestnet() {
 	return useGlobalSettingsStore((state) => state.network === "testnet");
+}
+
+/** Non-React read for stores/actions that prefill the default limit size. */
+export function getDefaultLimitSizeUsd(): number {
+	return useGlobalSettingsStore.getState().defaultLimitSizeUsd;
+}
+
+export function useDefaultLimitSizeUsd(): number {
+	return useGlobalSettingsStore((state) => state.defaultLimitSizeUsd);
+}
+
+export function useSizeButtonAmounts(): readonly number[] {
+	return useGlobalSettingsStore((state) => state.sizeButtonAmounts);
 }

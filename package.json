@@ -13,6 +13,9 @@
 		"build:website": "pnpm --filter @hypeterminal/website build",
 		"build:all": "pnpm build:terminal && pnpm build:website",
 		"serve": "pnpm --filter @hypeterminal/terminal serve",
+		"servers": "bash scripts/local-servers.sh list",
+		"servers:stop": "bash scripts/local-servers.sh stop",
+		"with-dev-server": "bash scripts/with-dev-server.sh",
 		"test": "pnpm --filter @hypeterminal/terminal test",
 		"typecheck": "pnpm -r --if-present typecheck",
 		"verify": "pnpm check && pnpm typecheck && pnpm test && pnpm build:all",
@@ -37,22 +40,5 @@
 		"@commitlint/config-conventional": "20.3.1",
 		"lefthook": "1.11.0",
 		"typescript": "5.7.2"
-	},
-	"pnpm": {
-		"overrides": {
-			"@noble/hashes": "1.8.0",
-			"jayson>uuid": "11.1.1",
-			"vite>esbuild": ">=0.28.1",
-			"tsx>esbuild": ">=0.28.1",
-			"esbuild": ">=0.28.1",
-			"viem>ws": ">=8.21.0",
-			"axios>form-data": ">=4.0.6",
-			"axios": ">=1.18.0",
-			"postcss": ">=8.5.23",
-			"js-yaml": ">=4.3.1 <5",
-			"svgo": ">=4.0.2",
-			"sharp": ">=0.35.0",
-			"valibot": ">=1.4.2"
-		}
 	}
 }

@@ -11,6 +11,7 @@ const testState = vi.hoisted(() => ({
 	connectAsync: vi.fn(),
 	isMobile: false,
 	jsQrDecode: vi.fn(),
+	reconnect: vi.fn(),
 	pairWalletConnectUri: vi.fn(),
 	walletConnectHandler: null as ((message: ConnectorMessage) => void) | null,
 }));
@@ -104,6 +105,7 @@ vi.mock("wagmi", () => ({
 		isPending: false,
 		mutateAsync: testState.connectAsync,
 	}),
+	useReconnect: () => ({ reconnect: testState.reconnect }),
 	useConnectors: () => [
 		{ id: "coinbaseWallet", name: "Coinbase Wallet", type: "coinbaseWallet", uid: "coinbase" },
 		{
@@ -265,6 +267,33 @@ describe("WalletModal", () => {
 		expect(container.textContent).toContain("Coinbase Wallet");
 		expect(container.textContent).toContain("WalletConnect");
 		expect(container.textContent).toContain("Mock Wallet");
+	});
+
+	it("offers a Reconnect rescue when a WalletConnect pairing was left pending (e.g. app reloaded)", async () => {
+		// The shared beforeEach stubs localStorage as a no-op; use a real map here.
+		const store = new Map<string, string>();
+		vi.stubGlobal("localStorage", {
+			getItem: vi.fn((key: string) => store.get(key) ?? null),
+			setItem: vi.fn((key: string, value: string) => void store.set(key, value)),
+			removeItem: vi.fn((key: string) => void store.delete(key)),
+		});
+		window.localStorage.setItem("hypeterminal:wc-pairing-pending", "1");
+		const { WalletModal } = await import("@/components/trade/components/wallet-modal");
+
+		act(() => {
+			root.render(createElement(WalletModal, { open: true, onOpenChange: vi.fn() }));
+		});
+		await flushAsyncWork();
+
+		const rescue = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Reconnect");
+		expect(rescue).toBeDefined();
+		act(() => {
+			rescue?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+		// The rescue waits for the WalletConnect provider to be ready before it
+		// re-attaches the session, so give it a tick to settle.
+		await flushAsyncWork(8);
+		expect(testState.reconnect).toHaveBeenCalled();
 	});
 
 	it("keeps the standard mobile WalletConnect path available alongside desktop linking", async () => {

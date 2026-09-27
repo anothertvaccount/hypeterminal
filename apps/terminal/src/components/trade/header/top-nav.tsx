@@ -1,17 +1,17 @@
-import { Button, ButtonIcon, Divider } from "@hypeterminal/ui";
+import { ButtonIcon, Divider } from "@hypeterminal/ui";
 import { t } from "@lingui/core/macro";
-import { Trans } from "@lingui/react/macro";
-import { DownloadSimpleIcon, GearIcon, TerminalIcon } from "@phosphor-icons/react";
+import { GearIcon, KeyboardIcon, TerminalIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import { Suspense } from "react";
-import { useConnection } from "wagmi";
 import { APP_BAR_BUTTON_HEIGHT_CLASS, APP_HEADER_HEIGHT_CLASS } from "@/config/layout";
 import { SCOPE_NAV_ITEMS, STATIC_NAV_ITEMS } from "@/config/nav";
 import { cn } from "@/lib/cn";
 import { createLazyComponent } from "@/lib/lazy";
 import { useExchangeScope } from "@/providers/exchange-scope";
-import { useDepositModalActions, useSettingsDialogActions } from "@/stores/use-global-modal-store";
+import { useSettingsDialogActions } from "@/stores/use-global-modal-store";
 import { useIsTestnet } from "@/stores/use-global-settings-store";
+import { useHotkeySettingsActions, useHotkeysEnabled } from "@/stores/use-hotkey-settings-store";
+import { NukeButton } from "../nuke-button";
 import { ThemeToggle } from "./theme-toggle";
 
 const UserMenu = createLazyComponent(() => import("./user-menu"), "UserMenu");
@@ -30,11 +30,11 @@ function getScopeAccentClass(scope: string): string {
 }
 
 export function TopNav() {
-	const { open: openDepositModal } = useDepositModalActions();
 	const { open: openSettingsDialog } = useSettingsDialogActions();
-	const { isConnected } = useConnection();
 	const { scope } = useExchangeScope();
 	const isTestnet = useIsTestnet();
+	const hotkeysOn = useHotkeysEnabled();
+	const { toggleEnabled: toggleHotkeys } = useHotkeySettingsActions();
 
 	const accentClass = getScopeAccentClass(scope);
 
@@ -87,22 +87,22 @@ export function TopNav() {
 			</div>
 
 			<div className="flex items-center gap-2 min-h-8">
-				{isConnected && (
-					<Button
-						variant="filled"
-						intent="brand"
-						size="sm"
-						onClick={() => openDepositModal("deposit")}
-						iconLeft={<DownloadSimpleIcon className="size-3.5" />}
-						className={cn(APP_BAR_BUTTON_HEIGHT_CLASS, "shrink-0 px-3")}
-					>
-						<Trans>Deposit</Trans>
-					</Button>
-				)}
 				<Suspense fallback={<UserMenuSkeleton />}>
 					<UserMenu />
 				</Suspense>
 				<ThemeToggle />
+				<NukeButton />
+				<ButtonIcon
+					variant="ghost"
+					intent="neutral"
+					className={cn("size-8 shrink-0", hotkeysOn ? "text-success" : "text-fg-muted opacity-50")}
+					onClick={toggleHotkeys}
+					aria-label={t`Hotkeys`}
+					aria-pressed={hotkeysOn}
+					title={hotkeysOn ? "Hotkeys on — click to disable" : "Hotkeys off — click to enable"}
+				>
+					<KeyboardIcon className="size-4" />
+				</ButtonIcon>
 				<ButtonIcon
 					variant="ghost"
 					intent="neutral"

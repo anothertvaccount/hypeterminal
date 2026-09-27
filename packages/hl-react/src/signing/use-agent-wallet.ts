@@ -3,7 +3,7 @@ import { type PrivateKeyAccount, privateKeyToAccount } from "viem/accounts";
 import { useConnection } from "wagmi";
 import { LRU } from "../lru";
 import { useHyperliquid } from "../provider";
-import { useAgentWalletStorage } from "./agent-storage";
+import { useAgentSessionAddress, useAgentWalletStorage } from "./agent-storage";
 import type { AgentWallet } from "./types";
 import { useAgentStatus } from "./use-agent-status";
 
@@ -31,9 +31,14 @@ export interface UseAgentWalletResult {
 
 export function useAgentWallet(): UseAgentWalletResult {
 	const { env } = useHyperliquid();
-	const { address: userAddress } = useConnection();
+	const { address: walletAddress } = useConnection();
+	// A phone linked through Phone Access has no wallet — the stored key is filed
+	// under the OWNER address we recorded at import, so trade on that account.
+	const sessionAddress = useAgentSessionAddress(env);
+	const userAddress = walletAddress ?? sessionAddress;
 	const { isReady } = useAgentStatus();
 
+	// Unconditional (hooks may not be conditional — the argument can be null).
 	const agentWallet = useAgentWalletStorage(env, userAddress);
 
 	const signer = isReady && agentWallet?.privateKey ? getCachedSigner(agentWallet.privateKey) : null;

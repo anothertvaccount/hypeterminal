@@ -9,6 +9,7 @@ import {
 	SCALE_LEVELS_MIN,
 } from "@/config/trade";
 import { getExecutedPrice } from "@/domain/trade/order/price";
+import { sampleScaleCurve } from "@/domain/trade/order/scale-distribution";
 import { clampInt, formatDecimalFloor, isPositive, toBig, toSafeBig } from "@/lib/trade/numbers";
 import { isScaleOrderType, isStopOrderType, isTriggerOrderType, usesLimitPrice } from "@/lib/trade/order-types";
 import type { Side } from "@/lib/trade/types";
@@ -29,6 +30,9 @@ export interface EntryOrderParams {
 	scaleStartPriceInput: string;
 	scaleEndPriceInput: string;
 	scaleLevelsNum: number | null;
+	/** Optional interactive distribution curves (null/absent = linear prices / uniform sizes). */
+	scalePriceDist?: number[] | null;
+	scaleAmountDist?: number[] | null;
 	tpSlEnabled: boolean;
 	canUseTpSl: boolean;
 	tpPriceNum: number | null;
@@ -57,6 +61,8 @@ export function buildOrders(params: EntryOrderParams): OrderBuildResult {
 		scaleStartPriceInput,
 		scaleEndPriceInput,
 		scaleLevelsNum,
+		scalePriceDist,
+		scaleAmountDist,
 		tpSlEnabled,
 		canUseTpSl,
 		tpPriceNum,
@@ -85,6 +91,8 @@ export function buildOrders(params: EntryOrderParams): OrderBuildResult {
 			scaleStartPriceInput,
 			scaleEndPriceInput,
 			scaleLevelsNum,
+			scalePriceDist,
+			scaleAmountDist,
 		});
 	} else if (isTriggerOrder) {
 		buildTriggerOrder(orders, {
@@ -106,15 +114,20 @@ export function buildOrders(params: EntryOrderParams): OrderBuildResult {
 			price,
 			slippageBps,
 			reduceOnly,
+			// Chase keeps the form's tif — post-only (Alo) is safe because
+			// use-order-submit prices the placement from a fresh book snapshot.
 			tif,
 		});
+	}
 
-		if (hasTp && tpPriceNum !== null) {
-			buildTpSlOrder(orders, { assetId, isBuy: !isBuy, formattedSize, triggerPrice: tpPriceNum, tpsl: "tp" });
-		}
-		if (hasSl && slPriceNum !== null) {
-			buildTpSlOrder(orders, { assetId, isBuy: !isBuy, formattedSize, triggerPrice: slPriceNum, tpsl: "sl" });
-		}
+	// TP/SL legs attach to ANY entry main — including the scale ladder (the ladder's
+	// total size closes across the shared full-size reduce-only triggers; grouping
+	// stays normalTpsl, mains first).
+	if (hasTp && tpPriceNum !== null) {
+		buildTpSlOrder(orders, { assetId, isBuy: !isBuy, formattedSize, triggerPrice: tpPriceNum, tpsl: "tp" });
+	}
+	if (hasSl && slPriceNum !== null) {
+		buildTpSlOrder(orders, { assetId, isBuy: !isBuy, formattedSize, triggerPrice: slPriceNum, tpsl: "sl" });
 	}
 
 	return { orders, grouping: hasTp || hasSl ? "normalTpsl" : "na" };
@@ -122,6 +135,8 @@ export function buildOrders(params: EntryOrderParams): OrderBuildResult {
 
 interface ScaleOrderParams {
 	assetId: number;
+	scalePriceDist?: number[] | null;
+	scaleAmountDist?: number[] | null;
 	isBuy: boolean;
 	sizeValue: number;
 	szDecimals: number;
@@ -133,23 +148,111 @@ interface ScaleOrderParams {
 }
 
 function buildScaleOrders(orders: ExchangeOrder[], params: ScaleOrderParams): void {
+	// Same helpers the canvas preview uses — the ladder you see is the ladder that ships.
 	const levels = clampInt(Math.round(params.scaleLevelsNum ?? SCALE_LEVELS_MIN), SCALE_LEVELS_MIN, SCALE_LEVELS_MAX);
-	const start = toSafeBig(params.scaleStartPriceInput);
-	const end = toSafeBig(params.scaleEndPriceInput);
-	const step = levels > 1 ? end.minus(start).div(levels - 1) : start.times(0);
-	const perLevelSize = toSafeBig(params.sizeValue).div(levels);
+	const prices = getScaleLevelPrices(
+		params.scaleStartPriceInput,
+		params.scaleEndPriceInput,
+		levels,
+		params.scalePriceDist,
+	);
+	const sizes = getScaleLevelSizes(params.sizeValue, levels, params.szDecimals, params.scaleAmountDist);
 
 	for (let i = 0; i < levels; i += 1) {
-		const levelPrice = start.plus(step.times(i)).toNumber();
 		orders.push({
 			a: params.assetId,
 			b: params.isBuy,
-			p: formatPriceForOrder(levelPrice),
-			s: formatSizeForOrder(perLevelSize.toNumber(), params.szDecimals),
+			p: prices[i],
+			s: sizes[i],
 			r: params.reduceOnly,
 			t: { limit: { tif: params.tif } },
 		});
 	}
+}
+
+/**
+ * Level prices for a scale ladder — mirrors buildScaleOrders' math exactly (Big
+ * step division + Hyperliquid price formatting) so the canvas preview lands on
+ * precisely the prices the submitted orders would.
+ */
+export function getScaleLevelPrices(
+	startPriceInput: string,
+	endPriceInput: string,
+	scaleLevelsNum: number | null,
+	scalePriceDist?: readonly number[] | null,
+): string[] {
+	const levels = clampInt(Math.round(scaleLevelsNum ?? SCALE_LEVELS_MIN), SCALE_LEVELS_MIN, SCALE_LEVELS_MAX);
+	const start = toSafeBig(startPriceInput);
+	const end = toSafeBig(endPriceInput);
+	const prices: string[] = [];
+	if (!scalePriceDist || scalePriceDist.length === 0) {
+		// Legacy linear path — kept byte-identical so existing plans/tests don't shift.
+		const step = levels > 1 ? end.minus(start).div(levels - 1) : start.times(0);
+		for (let i = 0; i < levels; i += 1) {
+			prices.push(formatPriceForOrder(start.plus(step.times(i)).toNumber()));
+		}
+		return prices;
+	}
+	for (let i = 0; i < levels; i += 1) {
+		const t = levels > 1 ? i / (levels - 1) : 0;
+		const fraction = sampleScaleCurve(scalePriceDist, t);
+		prices.push(formatPriceForOrder(start.plus(end.minus(start).times(fraction)).toNumber()));
+	}
+	return prices;
+}
+
+/**
+ * Per-rung sizes: uniform (size ÷ levels, the legacy behavior) or weighted by an
+ * amount curve sampled at each rung and normalized to the total. If a distribution
+ * would round some rung to zero at the market's size precision, falls back to the
+ * uniform split — a broken zero-size order is never emitted.
+ */
+export function getScaleLevelSizes(
+	sizeValue: number,
+	scaleLevelsNum: number | null,
+	szDecimals: number,
+	scaleAmountDist?: readonly number[] | null,
+): string[] {
+	const levels = clampInt(Math.round(scaleLevelsNum ?? SCALE_LEVELS_MIN), SCALE_LEVELS_MIN, SCALE_LEVELS_MAX);
+	const uniform = () => {
+		const per = toSafeBig(sizeValue).div(levels);
+		const single = formatSizeForOrder(per.toNumber(), szDecimals);
+		return Array.from({ length: levels }, () => single);
+	};
+	if (!scaleAmountDist || scaleAmountDist.length === 0) return uniform();
+
+	const weights: number[] = [];
+	let sum = 0;
+	for (let i = 0; i < levels; i += 1) {
+		const t = levels > 1 ? i / (levels - 1) : 0;
+		const w = Math.max(sampleScaleCurve(scaleAmountDist, t), 0);
+		weights.push(w);
+		sum += w;
+	}
+	if (!(sum > 0)) return uniform();
+	const sizes = weights.map((w) => formatSizeForOrder(toSafeBig(sizeValue).times(w).div(sum).toNumber(), szDecimals));
+	if (sizes.some((s) => !(Number(s) > 0))) return uniform();
+	return sizes;
+}
+
+/** A scale ladder can be previewed once start/end prices and the level count are usable. */
+export function canPreviewScale(
+	startPriceInput: string,
+	endPriceInput: string,
+	scaleLevelsNum: number | null,
+): boolean {
+	const start = Number(startPriceInput);
+	const end = Number(endPriceInput);
+	const levels = Math.round(scaleLevelsNum ?? Number.NaN);
+	return (
+		Number.isFinite(start) &&
+		start > 0 &&
+		Number.isFinite(end) &&
+		end > 0 &&
+		Number.isFinite(levels) &&
+		levels >= SCALE_LEVELS_MIN &&
+		levels <= SCALE_LEVELS_MAX
+	);
 }
 
 interface TriggerOrderParams {

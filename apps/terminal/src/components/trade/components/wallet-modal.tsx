@@ -14,10 +14,10 @@ import {
 	WarningCircleIcon,
 	XIcon,
 } from "@phosphor-icons/react";
-import { type ChangeEvent, type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type ChangeEvent, type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Address } from "viem";
 import { isAddress } from "viem";
-import { type Connector, useConnect, useConnectors } from "wagmi";
+import { type Connector, useConnect, useConnectors, useReconnect } from "wagmi";
 import { mock } from "wagmi/connectors";
 import { MOCK_WALLETS } from "@/config/wagmi";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -34,10 +34,13 @@ import {
 	getWalletInfo,
 	isMockConnector,
 	isWalletConnectConnector,
+	reconnectWhenReady,
 	subscribeWalletConnectUri,
 } from "@/lib/wallet-utils";
 
 const WALLET_LIST_MAX_HEIGHT = "max-h-[min(55vh,22rem)]";
+const WC_PAIRING_PENDING_KEY = "hypeterminal:wc-pairing-pending";
+const WC_PAIRING_TIMEOUT_MS = 5 * 60 * 1000;
 const DRAWER_HANDLE_SIZE_CLASS = "w-8 h-1";
 const WRONG_QR_FEEDBACK_THROTTLE_MS = 1800;
 
@@ -101,12 +104,16 @@ function ConnectorRow({
 	const walletInfo = getWalletInfo(connector);
 	const Icon = walletInfo.icon;
 	const isConnecting = connectingId === connector.uid;
+	// Plain mobile browsers expose no injected provider (MetaMask's app is only
+	// injectable inside its own dApp browser) — a dead button helps nobody.
+	const injectedWithoutProvider =
+		connector.type === "injected" && typeof window !== "undefined" && !("ethereum" in window);
 
 	return (
 		<button
 			type="button"
 			onClick={() => onConnect(connector)}
-			disabled={isPending}
+			disabled={isPending || injectedWithoutProvider}
 			className={cn(
 				"w-full flex items-center gap-3 px-4 py-2.5 cursor-pointer text-left",
 				"hover:bg-fill-hover active:bg-fill-press",
@@ -118,8 +125,15 @@ function ConnectorRow({
 			<div className="size-8 rounded-xs overflow-hidden flex-shrink-0" aria-hidden="true">
 				<Icon className="size-full" />
 			</div>
-			<span className="flex-1 text-sm font-medium group-hover:text-brand transition-colors min-w-0 truncate">
-				{connector.name}
+			<span className="flex-1 min-w-0 truncate">
+				<span className="text-sm font-medium group-hover:text-brand transition-colors block truncate">
+					{connector.name}
+				</span>
+				{injectedWithoutProvider && (
+					<span className="text-2xs text-fg-muted block truncate">
+						<Trans>No browser wallet detected — open this page inside your wallet's app, or use WalletConnect</Trans>
+					</span>
+				)}
 			</span>
 			{isRecent && (
 				<span className="text-2xs uppercase tracking-wider font-medium text-fg-muted bg-fill-weak px-1.5 py-0.5 rounded-xs flex-shrink-0">
@@ -583,6 +597,7 @@ function WalletConnectPairingPanel({ uri, isMobile }: { uri: string; isMobile: b
 function WalletContent({ onClose, isMobile }: { onClose: () => void; isMobile: boolean }) {
 	const connectors = useConnectors();
 	const { mutateAsync: connectAsync, isPending, error } = useConnect();
+	const { reconnect } = useReconnect();
 	const [connectingId, setConnectingId] = useState<string | null>(null);
 	const [walletConnectUri, setWalletConnectUri] = useState<string | null>(null);
 	const [desktopWalletScannerOpen, setDesktopWalletScannerOpen] = useState(false);
@@ -593,9 +608,66 @@ function WalletContent({ onClose, isMobile }: { onClose: () => void; isMobile: b
 	const [recentWallets] = useState(() => getRecentWallets());
 	const [customAddress, setCustomAddress] = useState("");
 	const [customAddressError, setCustomAddressError] = useState<string | null>(null);
+	// WalletConnect pairing has no built-in feedback loop: if the user approves in
+	// the wallet but the app is backgrounded/reloaded, the pending proposal is gone
+	// and the session sits unused. Track that we started a pairing and offer an
+	// explicit resume (the provider keeps the approved session in IndexedDB).
+	const [wcPairingPending, setWcPairingPending] = useState(false);
+	const [connectError, setConnectError] = useState<string | null>(null);
+	const wcPairingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-	const { mockConnectors, popular, other } = getWalletConnectorGroups(connectors, recentWallets);
-	const walletConnectConnector = connectors.find(isWalletConnectConnector) ?? null;
+	useEffect(() => {
+		try {
+			setWcPairingPending(localStorage.getItem(WC_PAIRING_PENDING_KEY) === "1");
+		} catch {
+			// storage unavailable — resume affordance simply stays hidden
+		}
+	}, []);
+
+	const clearWcPairingPending = useCallback(() => {
+		if (wcPairingTimerRef.current) {
+			clearTimeout(wcPairingTimerRef.current);
+			wcPairingTimerRef.current = null;
+		}
+		try {
+			localStorage.removeItem(WC_PAIRING_PENDING_KEY);
+		} catch {
+			// ignore
+		}
+		setWcPairingPending(false);
+	}, []);
+
+	const markWcPairingPending = useCallback(() => {
+		try {
+			localStorage.setItem(WC_PAIRING_PENDING_KEY, "1");
+		} catch {
+			// ignore
+		}
+		setWcPairingPending(true);
+		// Hard stop so a pairing can never hang forever with no way out.
+		if (wcPairingTimerRef.current) clearTimeout(wcPairingTimerRef.current);
+		wcPairingTimerRef.current = setTimeout(() => {
+			setConnectError(
+				t`Pairing timed out. If you approved in your wallet, tap Reconnect below — otherwise start again.`,
+			);
+			clearWcPairingPending();
+		}, WC_PAIRING_TIMEOUT_MS);
+	}, [clearWcPairingPending]);
+
+	useEffect(() => clearWcPairingPending, [clearWcPairingPending]);
+
+	// On phones, only WalletConnect can actually work: mobile browsers expose no
+	// injected provider, and the Coinbase SDK flow does not hand off reliably.
+	// Offering the other rows just produced dead buttons, so show the one that works.
+	// On phones only WalletConnect actually works (no injected provider, Coinbase's
+	// SDK handoff is unreliable) — the mock connectors stay, they are the dev/testing
+	// path and carry no real wallet.
+	const connectableConnectors = useMemo(
+		() => (isMobile ? connectors.filter((c) => isWalletConnectConnector(c) || isMockConnector(c)) : connectors),
+		[connectors, isMobile],
+	);
+	const { mockConnectors, popular, other } = getWalletConnectorGroups(connectableConnectors, recentWallets);
+	const walletConnectConnector = connectableConnectors.find(isWalletConnectConnector) ?? null;
 	const showDesktopWalletLink = isMobile && walletConnectConnector !== null;
 
 	const handleScannedWalletConnectUri = useCallback(
@@ -663,14 +735,28 @@ function WalletContent({ onClose, isMobile }: { onClose: () => void; isMobile: b
 		setConnectingId(connector.uid);
 		setDesktopWalletScannerOpen(false);
 		setDesktopWalletScannerError(null);
-		if (isWalletConnectConnector(connector)) setWalletConnectUri(null);
+		setConnectError(null);
+		if (isWalletConnectConnector(connector)) {
+			setWalletConnectUri(null);
+			markWcPairingPending();
+		}
 		const unsubscribeWalletConnectUri = subscribeWalletConnectUri(connector, setWalletConnectUri);
 		try {
 			await connectAsync({ connector });
+			clearWcPairingPending();
 			if (!isMockConnector(connector)) {
 				addRecentWallet(connector.id);
 			}
 			onClose();
+		} catch (error) {
+			clearWcPairingPending();
+			// Rejection is surfaced through useConnect().error (rendered in the modal);
+			// keep a local copy too so a wallet that reports nothing still explains itself.
+			setConnectError(
+				error instanceof Error && error.message
+					? error.message
+					: t`Connection failed. If you approved in your wallet, tap Reconnect — otherwise try again.`,
+			);
 		} finally {
 			unsubscribeWalletConnectUri();
 			if (isWalletConnectConnector(connector)) setWalletConnectUri(null);
@@ -829,13 +915,35 @@ function WalletContent({ onClose, isMobile }: { onClose: () => void; isMobile: b
 					</div>
 				)}
 
-				{error && (
+				{(connectError || error) && (
 					<div
 						role="alert"
 						className="mx-4 mb-3 flex items-start gap-2 p-2.5 rounded-xs bg-error-soft border border-stroke-error-strong/20"
 					>
 						<WarningCircleIcon className="size-3.5 text-error shrink-0 mt-0.5" aria-hidden="true" />
-						<p className="text-xs text-error">{error.message}</p>
+						<p className="text-2xs text-error">{connectError ?? error?.message}</p>
+					</div>
+				)}
+
+				{/* Approved-in-the-wallet rescue: the provider keeps the session, we just
+				    need to re-attach after a background reload killed the proposal. */}
+				{wcPairingPending && !isPending && !connectingId && (
+					<div className="mx-4 mb-3 flex items-center justify-between gap-2 rounded-xs border border-stroke-brand-strong/25 bg-fill-weak p-2.5">
+						<p className="text-2xs text-fg-muted">
+							<Trans>Approved in your wallet but not connected here?</Trans>
+						</p>
+						<Button
+							type="button"
+							variant="outline"
+							intent="brand"
+							size="xs"
+							onClick={() => {
+								setConnectError(null);
+								void reconnectWhenReady(connectors, reconnect);
+							}}
+						>
+							<Trans>Reconnect</Trans>
+						</Button>
 					</div>
 				)}
 			</div>

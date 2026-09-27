@@ -14,7 +14,10 @@ import { useState } from "react";
 import { useConnection } from "wagmi";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { FALLBACK_VALUE_PLACEHOLDER, HL_ALL_DEXS } from "@/config/app";
+import { PAPER_TRADE } from "@/config/paper";
+import { usePaperFills } from "@/hooks/trade/use-paper-fills";
 import { cn } from "@/lib/cn";
+import { playActionSound } from "@/lib/fill-sound";
 import { formatDateTime, formatPrice, formatToken, formatUSD } from "@/lib/format";
 import { useExchange, useMarkets, useSubscription } from "@/lib/hyperliquid";
 import {
@@ -28,6 +31,7 @@ import type { Side } from "@/lib/trade/types";
 import { useExchangeScope } from "@/providers/exchange-scope";
 import { useMarketActions } from "@/stores/use-market-store";
 import { useOrderEntryActions } from "@/stores/use-order-entry-store";
+import { usePaperActions, usePaperOpenOrderRows } from "@/stores/use-paper-store";
 import { AssetBadge } from "../components/asset-badge";
 import { Placeholder } from "./placeholder";
 import {
@@ -62,7 +66,7 @@ export function OrdersTab() {
 	} = useSubscription(
 		"openOrders",
 		{ user: address ?? "0x0", dex: HL_ALL_DEXS },
-		{ enabled: isConnected && !!address },
+		{ enabled: !PAPER_TRADE && isConnected && !!address },
 	);
 	const markets = useMarkets();
 	const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(() => new Set());
@@ -70,8 +74,11 @@ export function OrdersTab() {
 	const [pendingScopes, setPendingScopes] = useState<Set<CancelScope>>(() => new Set());
 
 	const { mutate: cancelOrders, error: cancelError, reset: resetCancelError } = useExchange("cancel");
+	const paperRows = usePaperOpenOrderRows();
+	const paperActions = usePaperActions();
+	usePaperFills();
 
-	const openOrders = openOrdersEvent?.orders ?? [];
+	const openOrders = PAPER_TRADE ? paperRows : (openOrdersEvent?.orders ?? []);
 
 	const openIds = new Set(openOrders.map((order) => order.oid));
 	const validSelectedIds = new Set<number>();
@@ -106,6 +113,16 @@ export function OrdersTab() {
 	function handleCancel(ordersToCancel: OpenOrder[], nextScope: CancelScope) {
 		if (ordersToCancel.length === 0) return;
 
+		if (PAPER_TRADE) {
+			paperActions.cancelOrders(ordersToCancel.map((order) => order.oid));
+			setSelectedOrderIds((prev) => {
+				const next = new Set(prev);
+				for (const order of ordersToCancel) next.delete(order.oid);
+				return next;
+			});
+			return;
+		}
+
 		const fresh = ordersToCancel.filter((order) => !cancellingOids.has(order.oid));
 		if (fresh.length === 0) return;
 
@@ -134,6 +151,7 @@ export function OrdersTab() {
 			{ cancels },
 			{
 				onSuccess: () => {
+					playActionSound();
 					setSelectedOrderIds((prev) => {
 						const next = new Set(prev);
 						for (const order of fresh) {
@@ -176,6 +194,9 @@ export function OrdersTab() {
 	const actionError = cancelError?.message;
 
 	function renderPlaceholder() {
+		if (PAPER_TRADE) {
+			return openOrders.length === 0 ? <Placeholder>{t`No open orders.`}</Placeholder> : null;
+		}
 		if (!isConnected) return <Placeholder>{t`Connect your wallet to view open orders.`}</Placeholder>;
 		if (status === "subscribing" || status === "idle") return <Placeholder>{t`Loading open orders...`}</Placeholder>;
 		if (status === "error") {
@@ -195,7 +216,7 @@ export function OrdersTab() {
 	return (
 		<div className={positionsPanelTabRootClass}>
 			<div className={positionsPanelTableCaptionRowClass}>
-				{isConnected ? (
+				{isConnected || PAPER_TRADE ? (
 					<span className="tabular-nums text-3xs text-fg-muted">
 						{openOrders.length} {t`orders`}
 					</span>

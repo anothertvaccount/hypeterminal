@@ -1,6 +1,6 @@
 import { Button } from "@hypeterminal/ui";
 import { t } from "@lingui/core/macro";
-import { CrosshairIcon, PencilIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
+import { CrosshairIcon, PencilIcon, PlusIcon, TimerIcon, XIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import { LIQ_WARNING_PROXIMITY } from "@/config/trade";
@@ -25,6 +25,7 @@ interface Props {
 	closeErrorMessage: string | null;
 	onClose: (data: ClosePositionData) => void;
 	onLimitClose: (data: LimitClosePositionData) => void;
+	onChaseClose: (data: ClosePositionData) => void;
 	onOpenTpSl: (data: TpSlPositionData) => void;
 	onSelectMarket: (coin: string, side: Side) => void;
 }
@@ -38,6 +39,7 @@ export function MobilePositionCard({
 	closeErrorMessage,
 	onClose,
 	onLimitClose,
+	onChaseClose,
 	onOpenTpSl,
 	onSelectMarket,
 }: Props) {
@@ -95,6 +97,20 @@ export function MobilePositionCard({
 			unrealizedPnl,
 			roe,
 			szDecimals,
+		});
+	}
+
+	function handleChaseClose() {
+		if (!canClose || typeof assetId !== "number") return;
+		onChaseClose({
+			assetId,
+			coin: p.coin,
+			size: absSize,
+			markPx,
+			szDecimals,
+			isLong,
+			unrealizedPnl,
+			roe,
 		});
 	}
 
@@ -231,6 +247,17 @@ export function MobilePositionCard({
 							disabled={!canClose || isRowClosing}
 						>
 							{t`Limit Close`}
+						</Button>
+						<Button
+							variant="outline"
+							intent="neutral"
+							size="xs"
+							className="flex-1 justify-center touch-target"
+							onClick={handleChaseClose}
+							disabled={!canClose || isRowClosing}
+							iconLeft={<TimerIcon className="size-3.5" />}
+						>
+							{t`Chase Close`}
 						</Button>
 						<Button
 							variant="outline"

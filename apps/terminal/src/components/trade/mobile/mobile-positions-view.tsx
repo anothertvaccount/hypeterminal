@@ -1,15 +1,18 @@
 import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@hypeterminal/ui";
 import { WalletIcon } from "@phosphor-icons/react";
 import { useState, useTransition } from "react";
-import { useConnection } from "wagmi";
 import { Spinner } from "@/components/ui/spinner";
 import { HL_ALL_DEXS } from "@/config/app";
+import { PAPER_TRADE } from "@/config/paper";
 import { MOBILE_POSITIONS_TABS, type MobilePositionsTabValue } from "@/config/trade";
 import { cn } from "@/lib/cn";
-import { useSubscription, useUserPositions } from "@/lib/hyperliquid";
+import { useSubscription, useTradingSession, useUserPositions } from "@/lib/hyperliquid";
 import { toNumber } from "@/lib/trade/numbers";
+import { useChaseEntry } from "@/stores/use-chase-order-store";
 import { useGlobalSettingsActions, usePositionsActiveTab } from "@/stores/use-global-settings-store";
+import { usePaperOpenOrderRows } from "@/stores/use-paper-store";
 import { WalletModal } from "../components/wallet-modal";
+import { ChaseTab } from "../positions/chase-tab";
 import { MobileBalancesTab } from "./mobile-balances-tab";
 import { MobileBottomNavSpacer } from "./mobile-bottom-nav";
 import { MobileFundingTab } from "./mobile-funding-tab";
@@ -29,38 +32,45 @@ export function MobilePositionsView({ className }: Props) {
 	const activeTab = usePositionsActiveTab() as TabValue;
 	const { setPositionsActiveTab } = useGlobalSettingsActions();
 	const [isPending, startTransition] = useTransition();
-	const { address, isConnected } = useConnection();
+	const { address, isActive } = useTradingSession();
 	const { positions, isLoading: isLoadingState } = useUserPositions();
 
 	const { data: ordersEvent, status: ordersStatus } = useSubscription(
 		"openOrders",
 		{ user: address ?? "0x0", dex: HL_ALL_DEXS },
-		{ enabled: isConnected && !!address },
+		{ enabled: isActive },
 	);
-	const openOrders = ordersEvent?.orders;
+	// Preview keeps orders in the paper store — the live stream is always empty there.
+	const paperRows = usePaperOpenOrderRows();
+	const openOrders = PAPER_TRADE ? paperRows : ordersEvent?.orders;
 	const isLoadingOrders = ordersStatus === "subscribing" || ordersStatus === "idle";
 
-	const positionsCount = isConnected
+	const positionsCount = isActive
 		? positions.reduce((count, entry) => {
 				const size = toNumber(entry.szi);
 				return size ? count + 1 : count;
 			}, 0)
 		: 0;
 
-	const ordersCount = isConnected ? (openOrders?.length ?? 0) : 0;
+	const ordersCount = isActive ? (openOrders?.length ?? 0) : 0;
 
 	function handleTabChange(value: string) {
 		startTransition(() => setPositionsActiveTab(value));
 	}
 
+	// A running chase has to be visible from the positions list: on the phone there is no
+	// desktop positions panel, so this badge is the only "is it still chasing?" signal.
+	const chaseEntry = useChaseEntry();
+
 	function getTabCount(tabValue: TabValue): number | null {
 		if (tabValue === "positions") return positionsCount;
 		if (tabValue === "orders") return ordersCount;
+		if (tabValue === "chase") return chaseEntry ? 1 : null;
 		return null;
 	}
 
 	function isTabLoading(tabValue: TabValue): boolean {
-		if (!isConnected) return false;
+		if (!isActive) return false;
 		if (tabValue === "positions") return isLoadingState;
 		if (tabValue === "orders") return isLoadingOrders;
 		return false;
@@ -91,7 +101,7 @@ export function MobilePositionsView({ className }: Props) {
 					</TabsList>
 				</div>
 				<div className="flex-1 min-h-0 overflow-y-auto">
-					{!isConnected ? (
+					{!isActive ? (
 						<EmptyState />
 					) : (
 						<>
@@ -112,6 +122,9 @@ export function MobilePositionsView({ className }: Props) {
 							</TabsContent>
 							<TabsContent value="orders-history" className={tabContentClass}>
 								<MobileOrdersHistoryTab />
+							</TabsContent>
+							<TabsContent value="chase" className={tabContentClass}>
+								<ChaseTab />
 							</TabsContent>
 							<TabsContent value="funding" className={tabContentClass}>
 								<MobileFundingTab />
@@ -134,7 +147,9 @@ function EmptyState() {
 				<div className="size-16 rounded-full flex items-center justify-center bg-surface">
 					<WalletIcon className="size-8 text-fg-muted" />
 				</div>
-				<p className="text-sm text-fg-muted max-w-xs text-pretty">Connect wallet to view positions</p>
+				<p className="text-sm text-fg-muted max-w-xs text-pretty">
+					Connect a wallet — or link a trading key from the Account tab — to view positions
+				</p>
 				<Button variant="outline" intent="brand" size="sm" onClick={() => setWalletModalOpen(true)}>
 					Connect Wallet
 				</Button>

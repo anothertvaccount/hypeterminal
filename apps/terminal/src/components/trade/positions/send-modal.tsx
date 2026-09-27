@@ -15,6 +15,7 @@ import { type ChangeEvent, useCallback, useMemo, useState } from "react";
 import { isAddress } from "viem";
 import { NumberInput } from "@/components/ui/number-input";
 import { DEFAULT_QUOTE_TOKEN } from "@/config/app";
+import { PAPER_MONEY_DISABLED_MESSAGE, PAPER_TRADE } from "@/config/paper";
 import { exceedsBalance, getTokenTransferDecimals, isAmountWithinBalance } from "@/domain/market";
 import { type BalanceRow, getPerpAvailable, getSpotAvailable, getSpotAvailableValue } from "@/domain/trade/balances";
 import { useDefaultDexBalances } from "@/hooks/trade/use-account-balances";
@@ -143,6 +144,10 @@ function SendModalBody({ onOpenChange, initialAsset, initialAccountType }: BodyP
 
 	const handleSend = useCallback(async () => {
 		if (!canSend) return;
+		if (PAPER_TRADE) {
+			setError(PAPER_MONEY_DISABLED_MESSAGE);
+			return;
+		}
 
 		setError(null);
 		try {

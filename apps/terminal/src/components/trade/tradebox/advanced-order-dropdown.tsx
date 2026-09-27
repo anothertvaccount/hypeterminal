@@ -3,6 +3,7 @@ import { t } from "@lingui/core/macro";
 import {
 	CrosshairIcon,
 	type Icon,
+	LightningIcon,
 	OctagonIcon,
 	RowsIcon,
 	TargetIcon,
@@ -35,6 +36,7 @@ type AdvancedOrderOption = {
 };
 
 const ADVANCED_ORDER_ICONS: Record<AdvancedOrderType, Icon> = {
+	chaseLimit: LightningIcon,
 	stopMarket: OctagonIcon,
 	stopLimit: XCircleIcon,
 	takeProfitMarket: TargetIcon,

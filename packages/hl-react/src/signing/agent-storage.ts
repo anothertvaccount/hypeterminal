@@ -9,6 +9,11 @@ const privateKeySchema = z
 	.regex(/^0x[0-9a-fA-F]{64}$/)
 	.transform((v) => v.toLowerCase() as Hex);
 
+const addressSchema = z
+	.string()
+	.regex(/^0x[0-9a-fA-F]{40}$/)
+	.transform((v) => v.toLowerCase() as Address);
+
 const publicKeySchema = z
 	.string()
 	.regex(/^0x[0-9a-fA-F]{40}$/)
@@ -86,6 +91,71 @@ export function removeAgentFromStorage(env: HyperliquidEnv, userAddress: string)
 // That's acceptable for session-length use (the keys also live in localStorage
 // for persistence) but callers in high-security contexts should consider a
 // shorter-lived store and a forced eviction on address change.
+// ---------------------------------------------------------------------------
+// Agent session pointer
+//
+// A linked phone (imported via Phone Access) has NO connected wallet — the agent
+// record itself is stored under the OWNER address. The pointer records which
+// account the linked key trades, so the app can load that account (balances,
+// positions, agent status, signing) with nothing else connected.
+// ---------------------------------------------------------------------------
+const AGENT_SESSION_PREFIX = "hyperliquid_agent_session_";
+let sessionVersion = 0;
+
+function getAgentSessionKey(env: HyperliquidEnv): string {
+	return `${AGENT_SESSION_PREFIX}${env}`;
+}
+
+/** Owner address of the trading key linked on this device, if any. */
+export function readAgentSessionAddress(env: HyperliquidEnv): Address | null {
+	if (typeof window === "undefined") return null;
+	try {
+		const raw = localStorage.getItem(getAgentSessionKey(env));
+		if (!raw) return null;
+		return addressSchema.parse(JSON.parse(raw).address ?? JSON.parse(raw));
+	} catch {
+		return null;
+	}
+}
+
+export function writeAgentSessionAddress(env: HyperliquidEnv, ownerAddress: string): void {
+	if (typeof window === "undefined") return;
+	try {
+		localStorage.setItem(getAgentSessionKey(env), JSON.stringify({ address: addressSchema.parse(ownerAddress) }));
+		sessionVersion++;
+		window.dispatchEvent(new StorageEvent("storage", { key: getAgentSessionKey(env) }));
+	} catch {
+		// Silent fail for storage errors — session bookkeeping must never break a flow.
+	}
+}
+
+export function clearAgentSessionAddress(env: HyperliquidEnv): void {
+	if (typeof window === "undefined") return;
+	try {
+		localStorage.removeItem(getAgentSessionKey(env));
+		sessionVersion++;
+		window.dispatchEvent(new StorageEvent("storage", { key: getAgentSessionKey(env) }));
+	} catch {
+		// Silent fail for storage errors.
+	}
+}
+
+/** Reactive read of the linked-key account (works with no wallet connected). */
+export function useAgentSessionAddress(env: HyperliquidEnv): Address | null {
+	return useSyncExternalStore(
+		(callback) => {
+			if (typeof window === "undefined") return () => undefined;
+			window.addEventListener("storage", callback);
+			return () => window.removeEventListener("storage", callback);
+		},
+		() => {
+			sessionVersion++;
+			return readAgentSessionAddress(env);
+		},
+		() => null,
+	);
+}
+
 /** @internal — exported only for tests; do not consume from outside this package. */
 export const snapshotCache = new LRU<string, { value: AgentWallet | null; version: number }>(4);
 let cacheVersion = 0;
@@ -147,7 +217,7 @@ export function subscribeToStorage(callback: () => void): () => void {
 	return () => window.removeEventListener("storage", handleStorage);
 }
 
-export function useAgentWalletStorage(env: HyperliquidEnv, userAddress: string | undefined): AgentWallet | null {
+export function useAgentWalletStorage(env: HyperliquidEnv, userAddress: string | null | undefined): AgentWallet | null {
 	return useSyncExternalStore(
 		subscribeToStorage,
 		() => {

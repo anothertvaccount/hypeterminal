@@ -3,13 +3,12 @@ import { t } from "@lingui/core/macro";
 import { TimerIcon } from "@phosphor-icons/react";
 import { Skeleton } from "boneyard-js/react";
 import { useMemo } from "react";
-import { useConnection } from "wagmi";
 import { TimeTicker } from "@/components/ui/time-ticker";
 import { FALLBACK_VALUE_PLACEHOLDER, HL_ALL_DEXS } from "@/config/app";
 import { getAvgPrice } from "@/domain/market";
 import { cn } from "@/lib/cn";
 import { formatDateTime, formatDuration, formatNumber, formatPrice } from "@/lib/format";
-import { useExchange, useMarkets, useSubscription } from "@/lib/hyperliquid";
+import { useExchange, useMarkets, useSubscription, useTradingSession } from "@/lib/hyperliquid";
 import { toBig } from "@/lib/trade/numbers";
 import { useExchangeScope } from "@/providers/exchange-scope";
 import { useMarketActions } from "@/stores/use-market-store";
@@ -21,13 +20,13 @@ interface Props {
 }
 
 export function MobileTwapTab({ className }: Props) {
-	const { address, isConnected } = useConnection();
+	const { address, isActive } = useTradingSession();
 	const { scope } = useExchangeScope();
 	const { setSelectedMarket } = useMarketActions();
 	const { data: twapStatesEvent } = useSubscription(
 		"twapStates",
 		{ user: address ?? "0x0", dex: HL_ALL_DEXS },
-		{ enabled: isConnected && !!address },
+		{ enabled: isActive },
 	);
 	const markets = useMarkets();
 	const { mutate: cancelTwap, isPending: isCancelling } = useExchange("twapCancel");
@@ -39,13 +38,13 @@ export function MobileTwapTab({ className }: Props) {
 		[twapStates],
 	);
 
-	const headerCount = isConnected ? `${activeOrders.length}` : FALLBACK_VALUE_PLACEHOLDER;
+	const headerCount = isActive ? `${activeOrders.length}` : FALLBACK_VALUE_PLACEHOLDER;
 	const twapStatesStatus = twapStatesEvent ? "active" : "loading";
 
-	if (!isConnected) {
+	if (!isActive) {
 		return (
 			<div className="flex-1 flex items-center justify-center p-6 text-sm text-fg-muted">
-				{t`Connect your wallet to view TWAP orders.`}
+				{t`Connect your wallet or link a trading key to view TWAP orders.`}
 			</div>
 		);
 	}

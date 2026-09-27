@@ -15,6 +15,8 @@ export function getAdvancedOrderTypeLabel(orderType: AdvancedOrderType): string 
 			return t`TWAP`;
 		case "scale":
 			return t`Scale`;
+		case "chaseLimit":
+			return t`Chase Limit`;
 	}
 }
 
@@ -47,7 +49,9 @@ export function isTwapOrderType(orderType: OrderType): boolean {
 }
 
 export function usesLimitPrice(orderType: OrderType): boolean {
-	return orderType === "limit" || orderType === "stopLimit" || orderType === "takeProfitLimit";
+	return (
+		orderType === "limit" || orderType === "stopLimit" || orderType === "takeProfitLimit" || orderType === "chaseLimit"
+	);
 }
 
 export function usesTriggerPrice(orderType: OrderType): boolean {
@@ -55,7 +59,8 @@ export function usesTriggerPrice(orderType: OrderType): boolean {
 }
 
 export function canUseTpSl(orderType: OrderType): boolean {
-	return orderType === "market" || orderType === "limit";
+	// Scale ladders attach shared reduce-only TP/SL triggers like any entry main.
+	return orderType === "market" || orderType === "limit" || orderType === "scale";
 }
 
 export function isTakerOrderType(orderType: OrderType): boolean {

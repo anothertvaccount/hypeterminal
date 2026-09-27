@@ -55,10 +55,14 @@ export type { HyperliquidContextValue, HyperliquidProviderProps } from "./provid
 export { HyperliquidProvider, useConfig, useHyperliquid, useHyperliquidOptional } from "./provider";
 export { createKey, infoKeys, serializeKey, subscriptionKeys } from "./query/keys";
 export {
+	clearAgentSessionAddress,
 	readAgentFromStorage,
+	readAgentSessionAddress,
 	removeAgentFromStorage,
+	useAgentSessionAddress,
 	useAgentWalletActions,
 	useAgentWalletStorage,
+	writeAgentSessionAddress,
 	writeAgentToStorage,
 } from "./signing/agent-storage";
 export {
@@ -94,6 +98,7 @@ export {
 } from "./signing/use-agent-registration";
 export { type AgentRequirements, type UseAgentStatusResult, useAgentStatus } from "./signing/use-agent-status";
 export { type UseAgentWalletResult, useAgentWallet } from "./signing/use-agent-wallet";
+export { type TradingSession, useTradingSession } from "./signing/use-trading-session";
 export type {
 	HyperliquidConfig,
 	HyperliquidQueryError,

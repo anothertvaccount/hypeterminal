@@ -27,6 +27,7 @@ interface Props {
 	isRowClosing: boolean;
 	isEven: boolean;
 	onClose: (data: ClosePositionData) => void;
+	onChaseClose: (data: ClosePositionData) => void;
 	onLimitClose: (data: LimitClosePositionData) => void;
 	onReverse: (data: ClosePositionData) => void;
 	onOpenTpSl: (data: TpSlPositionData) => void;
@@ -41,6 +42,7 @@ export function PositionRow({
 	isRowClosing,
 	isEven,
 	onClose,
+	onChaseClose,
 	onLimitClose,
 	onReverse,
 	onOpenTpSl,
@@ -124,6 +126,11 @@ export function PositionRow({
 	function handleClose() {
 		const data = buildCloseData();
 		if (data) onClose(data);
+	}
+
+	function handleChaseClose() {
+		const data = buildCloseData();
+		if (data) onChaseClose(data);
 	}
 
 	function handleLimitClose() {
@@ -262,6 +269,7 @@ export function PositionRow({
 					canClose={canClose}
 					isRowClosing={isRowClosing}
 					onMarketClose={handleClose}
+					onChaseClose={handleChaseClose}
 					onLimitClose={handleLimitClose}
 					onReverse={handleReverse}
 				/>

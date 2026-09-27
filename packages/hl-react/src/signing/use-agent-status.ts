@@ -3,7 +3,7 @@ import { type Address, zeroAddress } from "viem";
 import { useConnection } from "wagmi";
 import { useInfo } from "../hooks/useInfo";
 import { useHyperliquid } from "../provider";
-import { useAgentWalletStorage } from "./agent-storage";
+import { useAgentSessionAddress, useAgentWalletStorage } from "./agent-storage";
 import { isAgentApproved, isBuilderFeeApproved } from "./agent-utils";
 import type { BuilderConfig } from "./types";
 
@@ -45,19 +45,44 @@ function deriveRequirements(
 
 export function useAgentStatus(): UseAgentStatusResult {
 	const { env, builderConfig } = useHyperliquid();
-	const { address } = useConnection();
+	const { address: walletAddress } = useConnection();
+	// Linked-key sessions (Phone Access) have no connected wallet — the key is
+	// stored under the owner address recorded at import.
+	const sessionAddress = useAgentSessionAddress(env);
+	const address = walletAddress ?? sessionAddress;
 
+	// Unconditional (hooks may not be conditional — the argument can be null).
 	const localAgent = useAgentWalletStorage(env, address);
 	const hasBuilderConfig = !!builderConfig?.b;
 	const userAddress = address ?? zeroAddress;
 
+	// These two reads GATE the trading signer: isReady is false until both are known,
+	// so a single failed or rate-limited request used to leave the device permanently
+	// unable to trade (with no error anywhere). Retry a few times before giving up,
+	// and keep re-checking in the background while the key is still not ready so a
+	// cold read recovers on its own.
+	const readinessRetry = {
+		retry: 3,
+		retryDelay: (attempt: number) => Math.min(4_000, 500 * 2 ** attempt),
+		retryDelayAttemptLimit: 2,
+	};
 	const builderFeeQuery = useInfo(
 		"maxBuilderFee",
 		{ user: userAddress, builder: builderConfig?.b ?? zeroAddress },
-		{ enabled: !!address && hasBuilderConfig },
+		{
+			enabled: !!address && hasBuilderConfig,
+			...readinessRetry,
+		},
 	);
 
-	const extraAgentsQuery = useInfo("extraAgents", { user: userAddress }, { enabled: !!address });
+	const extraAgentsQuery = useInfo(
+		"extraAgents",
+		{ user: userAddress },
+		{
+			enabled: !!address,
+			...readinessRetry,
+		},
+	);
 
 	const isLoading = builderFeeQuery.isLoading || extraAgentsQuery.isLoading;
 	const requirements = deriveRequirements(

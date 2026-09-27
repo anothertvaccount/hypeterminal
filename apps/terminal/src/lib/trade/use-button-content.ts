@@ -18,7 +18,6 @@ interface ButtonContentInput {
 	sideLabel: string;
 	isSubmitting: boolean;
 	onConnectWallet: () => void;
-	onDeposit: () => void;
 	onRegister: () => void;
 	onSubmit: () => void;
 }
@@ -67,14 +66,8 @@ export function useButtonContent(input: ButtonContentInput): ButtonContent {
 				variant: "cyan",
 			};
 		}
-		if (input.availableBalance <= 0) {
-			return {
-				text: t`Deposit`,
-				action: input.onDeposit,
-				disabled: false,
-				variant: "cyan",
-			};
-		}
+		// (Deposit/withdraw/bridge moved out of the app — funds live on Hyperliquid.
+		// With a zero balance the Place Order button below simply stays disabled.)
 		return {
 			text: t`Place ${input.sideLabel} Order`,
 			action: input.onSubmit,
@@ -86,7 +79,6 @@ export function useButtonContent(input: ButtonContentInput): ButtonContent {
 		input.needsChainSwitch,
 		input.isSwitchingChain,
 		input.switchChain,
-		input.availableBalance,
 		input.validation.needsApproval,
 		input.validation.canSubmit,
 		registerText,
@@ -94,7 +86,6 @@ export function useButtonContent(input: ButtonContentInput): ButtonContent {
 		input.canApprove,
 		input.isAgentLoading,
 		input.onConnectWallet,
-		input.onDeposit,
 		input.onRegister,
 		input.onSubmit,
 		input.side,

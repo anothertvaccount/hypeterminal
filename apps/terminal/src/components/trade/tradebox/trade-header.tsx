@@ -50,6 +50,11 @@ export function TradeHeader({
 		...(!isSpot
 			? [
 					{
+						label: t`Chase Limit`,
+						active: orderType === "chaseLimit",
+						onSelect: () => onOrderTypeChange("chaseLimit" as OrderType),
+					},
+					{
 						label: t`Stop Market`,
 						active: orderType === "stopMarket",
 						onSelect: () => onOrderTypeChange("stopMarket" as OrderType),

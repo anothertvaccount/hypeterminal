@@ -1,8 +1,10 @@
 import { ButtonIcon } from "@hypeterminal/ui";
-import { BellIcon, GearIcon, TerminalIcon } from "@phosphor-icons/react";
+import { BellIcon, GearIcon, SpeakerHighIcon, SpeakerSlashIcon, TerminalIcon } from "@phosphor-icons/react";
+import { useState } from "react";
 import { APP_HEADER_HEIGHT_CLASS } from "@/config/layout";
 import { UI_TEXT } from "@/config/ui-text";
 import { cn } from "@/lib/cn";
+import { isFillSoundMuted, setFillSoundMuted } from "@/lib/fill-sound";
 import { useSettingsDialogActions } from "@/stores/use-global-modal-store";
 import { ThemeToggle } from "../header/theme-toggle";
 import { UserMenu } from "../header/user-menu";
@@ -16,6 +18,7 @@ interface Props {
 
 export function MobileHeader({ className }: Props) {
 	const { open: openSettingsDialog } = useSettingsDialogActions();
+	const [fillSoundMuted, setFillSoundMutedState] = useState(() => isFillSoundMuted());
 
 	return (
 		<header
@@ -44,6 +47,23 @@ export function MobileHeader({ className }: Props) {
 						aria-label={TOP_NAV_TEXT.NOTIFICATIONS_ARIA}
 					>
 						<BellIcon className="size-4" />
+					</ButtonIcon>
+					{/* The sound toggle used to float bottom-left over the Long/Short button. */}
+					<ButtonIcon
+						variant="ghost"
+						intent="neutral"
+						size="md"
+						className="touch-target"
+						aria-label="Trade sound"
+						aria-pressed={!fillSoundMuted}
+						title={fillSoundMuted ? "Enable trade sounds" : "Mute trade sounds (fills, placements, cancels)"}
+						onClick={() => {
+							const next = !fillSoundMuted;
+							setFillSoundMuted(next);
+							setFillSoundMutedState(next);
+						}}
+					>
+						{fillSoundMuted ? <SpeakerSlashIcon className="size-4" /> : <SpeakerHighIcon className="size-4" />}
 					</ButtonIcon>
 					<ThemeToggle />
 					<ButtonIcon

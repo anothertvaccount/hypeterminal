@@ -5,6 +5,7 @@ import {
 	CheckCircleIcon,
 	CopyIcon,
 	DeviceMobileIcon,
+	GithubLogoIcon,
 	KeyIcon,
 	SpinnerGapIcon,
 	WalletIcon,
@@ -23,8 +24,10 @@ import {
 } from "react";
 import { useConnection } from "wagmi";
 import { WalletModal } from "@/components/trade/components/wallet-modal";
+import { GITHUB_URL } from "@/config/app";
+import { PAPER_TRADE } from "@/config/paper";
 import { shortenAddress } from "@/lib/format";
-import { useAgentWalletActions, useHyperliquid } from "@/lib/hyperliquid";
+import { useAgentWalletActions, useHyperliquid, writeAgentSessionAddress } from "@/lib/hyperliquid";
 import {
 	clearMobileSyncDraft,
 	isMobileSyncEnvelopeExpired,
@@ -37,6 +40,7 @@ import {
 	isMobileSyncError,
 	MOBILE_SYNC_ROUTE_PATH,
 	type MobileSyncEnvelope,
+	MobileSyncError,
 	parseMobileSyncUrl,
 	readAndClearMobileSyncEnvelope,
 } from "@/lib/mobile-sync/sync-core";
@@ -155,7 +159,9 @@ function MobileAgentSyncRoute() {
 		processLocationSyncHash();
 
 		function handleLocationChange() {
-			if (window.location.pathname === MOBILE_SYNC_ROUTE_PATH && window.location.hash) {
+			// BASE_URL-aware: subpath deploys serve this route at /terminal/...
+			const phonePath = `${import.meta.env.BASE_URL}mobile-agent-sync`.replace(/\/+$/, "");
+			if (window.location.pathname.replace(/\/+$/, "") === phonePath && window.location.hash) {
 				processLocationSyncHash();
 			}
 		}
@@ -220,12 +226,11 @@ function MobileAgentSyncRoute() {
 		if (!envelope || status.state === "importing") return;
 
 		setSubmitError(null);
-		if (!address) {
-			setSubmitError(t`Connect the same wallet used on desktop before importing phone access.`);
-			setStatus({ state: "idle" });
-			return;
-		}
-
+		// No owner wallet is required on the phone. The sealed link + pairing code IS
+		// the credential; the binding is the on-chain check below — the agent must
+		// really be an approved (trade-only, time-boxed) agent of the account the
+		// link names, which a fabricated link cannot produce. Connecting a wallet
+		// here is an OPTIONAL extra proof that the account is yours.
 		const ownerAddress = address;
 		setStatus({ state: "importing" });
 
@@ -233,19 +238,58 @@ function MobileAgentSyncRoute() {
 			const imported = await decryptMobileAgentSyncEnvelope(envelope, pairingCode, {
 				currentOrigin: window.location.origin,
 				expectedEnv: env,
-				expectedUserAddress: ownerAddress,
+				// Undefined without a connected wallet → the account match is decided by
+				// the on-chain agent check instead; a connected wallet must still match.
+				expectedUserAddress: ownerAddress ?? undefined,
 			});
-			const extraAgents = await info.extraAgents({ user: ownerAddress });
+			// The agent was approved on desktop moments ago; Hyperliquid can take a
+			// few seconds to list it, so retry before telling the user it is unapproved.
+			let extraAgents: Awaited<ReturnType<typeof info.extraAgents>> = [];
+			for (let attempt = 0; attempt < 3; attempt++) {
+				try {
+					extraAgents = (await info.extraAgents({ user: ownerAddress ?? imported.userAddress })) ?? [];
+				} catch {
+					extraAgents = [];
+				}
+				if (extraAgents.some((agent) => agent.address?.toLowerCase() === imported.agentAddress.toLowerCase())) {
+					break;
+				}
+				await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 700 : 1500));
+			}
+			// Preview links never register the agent on Hyperliquid (no wallet
+			// signature) — honor the embedded preview marker by supplying the
+			// registry record locally. Harmless in preview: the phone trades
+			// simulated funds and the link is AES-sealed + pairing-code gated.
+			if (PAPER_TRADE && imported.preview === true) {
+				extraAgents = [
+					{
+						address: imported.agentAddress,
+						name: imported.agentName,
+						validUntil: imported.agentValidUntilMs,
+					},
+					...extraAgents,
+				];
+			}
+			const expectedOwner = ownerAddress ?? imported.userAddress;
+			if (!expectedOwner) {
+				throw new MobileSyncError("account_mismatch");
+			}
 			const verifiedAgent = verifyImportedMobileAgent({
 				imported,
 				extraAgents,
 				expectedEnv: env,
-				expectedUserAddress: ownerAddress,
+				// Preview links without a wallet fall back to the link's own owner claim
+				// (gated by the embedded preview marker); everything else needs the
+				// connected wallet or the import fails with the account mismatch.
+				expectedUserAddress: expectedOwner,
 			});
 			const { privateKey, publicKey, ...metadata } = verifiedAgent;
 
 			setAgent(imported.env, imported.userAddress, privateKey, publicKey, metadata);
 			clearMobileSyncDraft();
+			// Record which account this device trades: from here on the app loads its
+			// balances/positions and signs through this key with no wallet connected.
+			writeAgentSessionAddress(env, imported.userAddress);
 			setEnvelope(null);
 			setEnvelopeSource(null);
 			setPairingCode("");
@@ -295,8 +339,7 @@ function MobileAgentSyncRoute() {
 	const isImporting = status.state === "importing";
 	const pairingCodeReady = pairingCode.replace(/[\s-]/g, "").length === 16;
 	const pairingCodeDisabled = !envelope || !!loadError || isImporting || status.state === "success";
-	const importDisabled =
-		!address || !envelope || !!loadError || isImporting || status.state === "success" || !pairingCodeReady;
+	const importDisabled = !envelope || !!loadError || isImporting || status.state === "success" || !pairingCodeReady;
 	const needsPastedLink = !envelope || !!loadError;
 	const showPhoneLinkForm = needsPastedLink || showLinkInput;
 	const handleLinkInputChange = (event: ChangeEvent<HTMLInputElement>) => setLinkInput(event.target.value);
@@ -538,6 +581,44 @@ function LoadedLinkPanel({
 					complete={pairingCodeReady}
 				/>
 			</div>
+
+			{/* What this page just did, in plain terms — the user is handing a trading
+			    key to a phone, so say where the data went and what is kept. */}
+			<div className="space-y-1.5 rounded-8 border border-stroke-weak bg-background p-3 text-2xs leading-relaxed text-fg-muted">
+				<p className="font-semibold text-fg">
+					<Trans>What happens when you import</Trans>
+				</p>
+				<p>
+					<Trans>
+						The link arrived encrypted (AES-GCM). Your pairing code decrypts it in this browser — it is never sent
+						anywhere. The part of the link after the # was never sent to the website either, and this site has no
+						backend, so there is no copy of your key on any server.
+					</Trans>{" "}
+					<a
+						href={GITHUB_URL}
+						target="_blank"
+						rel="noopener noreferrer"
+						className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stroke-focus"
+					>
+						<GithubLogoIcon className="size-3" aria-hidden />
+						<Trans>
+							It is open source — browse the repository and see there is no server-side code that could hold your key.
+						</Trans>
+					</a>
+				</p>
+				<p>
+					<Trans>
+						Only your account address was checked against Hyperliquid's public API to confirm the key is approved. After
+						import the key is stored in this browser only, where it can place orders but never withdraw.
+					</Trans>
+				</p>
+				<p>
+					<Trans>
+						Use "Forget this key" in Account to erase it here, or "Reset phone access" on desktop to revoke it
+						everywhere at once.
+					</Trans>
+				</p>
+			</div>
 		</div>
 	);
 }
@@ -579,7 +660,15 @@ function ConnectWalletCallout({ onConnect }: { onConnect: () => void }) {
 			<div className="flex items-start gap-2">
 				<WarningCircleIcon className="mt-0.5 size-4 shrink-0 text-warning" weight="fill" aria-hidden />
 				<p className="text-warning">
-					<Trans>Connect the same owner wallet used on desktop before importing phone access.</Trans>
+					{PAPER_TRADE ? (
+						<Trans>No wallet needed in preview — the pairing code unlocks this link on its own.</Trans>
+					) : (
+						<Trans>
+							No wallet needed on this phone — the link and pairing code unlock trading by themselves. Anyone holding
+							both can trade this account (withdrawals are impossible), so treat them like a password. Connect a wallet
+							only to verify the account is yours.
+						</Trans>
+					)}
 				</p>
 			</div>
 			<Button
@@ -621,7 +710,7 @@ function SuccessPanel({ userAddress, agentAddress }: { userAddress: string; agen
 				intent="neutral"
 				size="md"
 				className="w-full"
-				onClick={() => window.location.assign("/")}
+				onClick={() => window.location.assign(import.meta.env.BASE_URL)}
 			>
 				<Trans>Open terminal</Trans>
 			</Button>

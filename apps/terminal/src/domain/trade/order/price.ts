@@ -23,7 +23,9 @@ export function getOrderPrice(
 	scaleStartPriceInput: string,
 	scaleEndPriceInput: string,
 ): number {
-	if (orderType === "market" || isTwapOrderType(orderType)) {
+	if (orderType === "market" || isTwapOrderType(orderType) || orderType === "chaseLimit") {
+		// Chase owns its price (engine-driven) — validate/derive against the mark so the
+		// hidden price field can stay empty.
 		return markPx;
 	}
 	if (isStopOrderType(orderType) || isTakeProfitOrderType(orderType)) {

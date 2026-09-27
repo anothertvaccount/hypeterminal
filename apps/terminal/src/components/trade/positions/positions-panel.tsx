@@ -3,6 +3,7 @@ import { Suspense, useMemo, useTransition } from "react";
 import { useConnection } from "wagmi";
 import { Spinner } from "@/components/ui/spinner";
 import { HL_ALL_DEXS } from "@/config/app";
+import { PAPER_TRADE } from "@/config/paper";
 import { POSITIONS_TABS } from "@/config/trade";
 import { useDefaultDexBalances } from "@/hooks/trade/use-account-balances";
 import { cn } from "@/lib/cn";
@@ -10,11 +11,14 @@ import { useSubscription, useUserPositions } from "@/lib/hyperliquid";
 import { createLazyComponent } from "@/lib/lazy";
 import { useRenderCommitTrack } from "@/lib/performance/render-profile";
 import { toNumberOrZero } from "@/lib/trade/numbers";
+import { useChaseEntry } from "@/stores/use-chase-order-store";
 import { useGlobalSettingsActions, usePositionsActiveTab } from "@/stores/use-global-settings-store";
+import { usePaperOpenOrderRows } from "@/stores/use-paper-store";
 
 const tabContentBaseClass = "flex-1 min-h-0 flex flex-col mt-0";
 
 const BalancesTab = createLazyComponent(() => import("./balances-tab"), "BalancesTab");
+const ChaseTab = createLazyComponent(() => import("./chase-tab"), "ChaseTab");
 const FundingTab = createLazyComponent(() => import("./funding-tab"), "FundingTab");
 const HistoryTab = createLazyComponent(() => import("./history-tab"), "HistoryTab");
 const OrdersHistoryTab = createLazyComponent(() => import("./orders-history-tab"), "OrdersHistoryTab");
@@ -40,7 +44,9 @@ export function PositionsPanel() {
 		{ user: address ?? "0x0", dex: HL_ALL_DEXS },
 		{ enabled: isConnected && !!address },
 	);
-	const openOrders = ordersEvent?.orders;
+	// Preview keeps orders in the paper store — the live stream is always empty there.
+	const paperRows = usePaperOpenOrderRows();
+	const openOrders = PAPER_TRADE ? paperRows : ordersEvent?.orders;
 	const twapCount = isConnected ? (twapStatesEvent?.states?.length ?? 0) : null;
 
 	function handleTabChange(value: string) {
@@ -48,6 +54,7 @@ export function PositionsPanel() {
 	}
 
 	const positionsCount = isConnected ? positions.length : null;
+	const chaseEntry = useChaseEntry();
 
 	const ordersCount = isConnected ? (openOrders?.length ?? 0) : null;
 
@@ -71,6 +78,7 @@ export function PositionsPanel() {
 		if (tabValue === "positions") return positionsCount;
 		if (tabValue === "orders") return ordersCount;
 		if (tabValue === "twap") return twapCount;
+		if (tabValue === "chase") return chaseEntry ? 1 : null;
 		return null;
 	}
 
@@ -124,6 +132,11 @@ export function PositionsPanel() {
 				<TabsContent value="orders-history" className={tabContentClass}>
 					<Suspense fallback={<TabLoadingFallback />}>
 						<OrdersHistoryTab />
+					</Suspense>
+				</TabsContent>
+				<TabsContent value="chase" className={tabContentClass}>
+					<Suspense fallback={<TabLoadingFallback />}>
+						<ChaseTab />
 					</Suspense>
 				</TabsContent>
 				<TabsContent value="history" className={tabContentClass}>

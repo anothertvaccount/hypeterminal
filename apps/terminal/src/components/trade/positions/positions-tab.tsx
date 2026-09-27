@@ -6,6 +6,7 @@ import { useConnection } from "wagmi";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { HL_ALL_DEXS } from "@/config/app";
 import { buildOrderPlan } from "@/domain/trade/order-intent";
+import { useChaseClose } from "@/hooks/trade/use-chase-close";
 import { useSubmitPlan } from "@/hooks/trade/use-submit-plan";
 import { cn } from "@/lib/cn";
 import { useMarkets, useSubscription, useUserPositions } from "@/lib/hyperliquid";
@@ -39,6 +40,7 @@ export function PositionsTab() {
 	const { scope } = useExchangeScope();
 	const { setSelectedMarket } = useMarketActions();
 	const { setSide } = useOrderEntryActions();
+	const handleChaseClose = useChaseClose();
 
 	function handleSelectMarket(name: string, side: Side) {
 		setSelectedMarket(scope, name);
@@ -232,6 +234,7 @@ export function PositionsTab() {
 											isRowClosing={typeof assetId === "number" && closingAssetIds.has(assetId)}
 											isEven={i % 2 === 1}
 											onClose={handleClosePosition}
+											onChaseClose={handleChaseClose}
 											onLimitClose={handleOpenLimitCloseModal}
 											onReverse={handleReverse}
 											onOpenTpSl={handleOpenTpSlModal}

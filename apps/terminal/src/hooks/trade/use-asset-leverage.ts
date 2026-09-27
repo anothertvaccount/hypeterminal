@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { useConnection } from "wagmi";
+import { PAPER_TRADE } from "@/config/paper";
 import { DEFAULT_MAX_LEVERAGE } from "@/config/trade";
 import {
 	getMarketCapabilities,
 	useExchange,
 	useSelectedMarketInfo,
 	useSubscription,
+	useTradingSession,
 	useUserPositions,
 } from "@/lib/hyperliquid";
+import { paperAvailableUsdc } from "@/lib/paper-trading";
 import { getMarginModeFromLeverage, type MarginMode } from "@/lib/trade/margin-mode";
 import { toNumber } from "@/lib/trade/numbers";
 import { useGlobalSettingsActions, useMarginMode } from "@/stores/use-global-settings-store";
+import { usePaperPositions, usePaperRealizedUsd } from "@/stores/use-paper-store";
 
 type OperationType = "leverage" | "mode" | null;
 
@@ -46,7 +49,9 @@ function getDefaultLeverage(maxLeverage: number): number {
 }
 
 export function useAssetLeverage(): UseAssetLeverageReturn {
-	const { address, isConnected } = useConnection();
+	// `updateLeverage` is an L1 action signed by the trading client, so a linked
+	// Phone Access key can drive margin/leverage with no wallet attached.
+	const { address, isActive: isConnected } = useTradingSession();
 	const { data: market } = useSelectedMarketInfo();
 
 	const storedMarginMode = useMarginMode();
@@ -63,10 +68,12 @@ export function useAssetLeverage(): UseAssetLeverageReturn {
 	const { data: activeAssetData, status: subscriptionStatus } = useSubscription(
 		"activeAssetData",
 		{ coin: baseToken ?? "", user: address ?? "" },
-		{ enabled: isConnected && !!address && !!baseToken && isPerpMarket },
+		{ enabled: isConnected && !!baseToken && isPerpMarket && !PAPER_TRADE },
 	);
 
 	const userPositions = useUserPositions();
+	const paperPositions = usePaperPositions();
+	const paperRealized = usePaperRealizedUsd();
 
 	const { mutateAsync: updateLeverage, isPending, error, reset: resetMutation } = useExchange("updateLeverage");
 
@@ -113,7 +120,8 @@ export function useAssetLeverage(): UseAssetLeverageReturn {
 
 	function setPendingLeverage(value: number) {
 		const clamped = Math.max(1, Math.min(value, maxLeverage));
-		if (!isConnected) {
+		if (!isConnected || PAPER_TRADE) {
+			// Paper trading: keep leverage in local state — never call updateLeverage.
 			setDisconnectedLeverage(clamped);
 			setPendingLeverageState(null);
 			return;
@@ -153,7 +161,7 @@ export function useAssetLeverage(): UseAssetLeverageReturn {
 			throw new Error("This market only supports isolated margin mode");
 		}
 
-		if (!isConnected) {
+		if (!isConnected || PAPER_TRADE) {
 			setStoredMarginMode(mode);
 			return;
 		}
@@ -181,7 +189,7 @@ export function useAssetLeverage(): UseAssetLeverageReturn {
 			throw new Error("This market only supports isolated margin mode");
 		}
 
-		if (!isConnected) {
+		if (!isConnected || PAPER_TRADE) {
 			setStoredMarginMode(mode);
 			setDisconnectedLeverage(clamped);
 			setPendingLeverageState(null);
@@ -204,6 +212,13 @@ export function useAssetLeverage(): UseAssetLeverageReturn {
 	}
 
 	function computeMaxTradeSzs(): [number, number] | null {
+		if (PAPER_TRADE) {
+			const px = toNumber(market?.markPx ?? null);
+			const available = paperAvailableUsdc(paperPositions, paperRealized);
+			if (px === null || px <= 0) return null;
+			const maxBase = (available * displayLeverage) / px;
+			return [maxBase, maxBase];
+		}
 		const raw = activeAssetData?.maxTradeSzs;
 		if (!raw) return null;
 		const long = toNumber(raw[0]);
@@ -213,6 +228,10 @@ export function useAssetLeverage(): UseAssetLeverageReturn {
 	const maxTradeSzs = computeMaxTradeSzs();
 
 	function computeAvailableToTrade(): [number, number] | null {
+		if (PAPER_TRADE) {
+			const available = paperAvailableUsdc(paperPositions, paperRealized);
+			return [available, available];
+		}
 		const raw = activeAssetData?.availableToTrade;
 		if (!raw) return null;
 		const long = toNumber(raw[0]);
