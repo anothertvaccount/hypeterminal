@@ -52,7 +52,13 @@ export type {
 	UnifiedMarket,
 } from "./markets/types";
 export type { HyperliquidContextValue, HyperliquidProviderProps } from "./provider";
-export { HyperliquidProvider, useConfig, useHyperliquid, useHyperliquidOptional } from "./provider";
+export {
+	HyperliquidProvider,
+	useConfig,
+	useHyperliquid,
+	useHyperliquidOptional,
+	useHyperliquidStoreApi,
+} from "./provider";
 export { createKey, infoKeys, serializeKey, subscriptionKeys } from "./query/keys";
 export {
 	clearAgentSessionAddress,

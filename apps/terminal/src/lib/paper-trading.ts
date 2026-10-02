@@ -41,6 +41,7 @@ export interface PaperOrderMeta {
 
 /** A limit order resting on the simulated book — drawn on the chart and draggable. */
 export interface PaperOpenOrder {
+	isPositionTpsl?: boolean;
 	oid: number;
 	assetId: number;
 	coin: string;
@@ -401,7 +402,10 @@ export function collectPaperFills(
 			remaining.push(order);
 			continue;
 		}
-		filled.push(order);
+		const position = nextPositions.find((row) => row.coin === order.coin);
+		const fullClose = order.isTrigger && order.reduceOnly && order.size === 0;
+		const size = fullClose && position && position.szi > 0 !== order.isBuy ? Math.abs(position.szi) : order.size;
+		filled.push(fullClose ? { ...order, size } : order);
 		if (isSpotAssetId(order.assetId)) continue; // spot fills don't move perp positions
 		// Fill price: marketable orders execute at the market, never worse than the limit
 		// (dragging a buy above the mark opens at the current price, like a real book).
@@ -411,7 +415,7 @@ export function collectPaperFills(
 			coin: order.coin,
 			dex: order.dex,
 			isBuy: order.isBuy,
-			size: order.size,
+			size,
 			price: crossedPrice,
 			reduceOnly: order.reduceOnly,
 			isTrigger: false,
@@ -445,7 +449,7 @@ export function toOpenOrder(order: PaperOpenOrder): OpenOrder {
 			isTrigger: true,
 			triggerPx: String(triggerPx),
 			children: [],
-			isPositionTpsl: false,
+			isPositionTpsl: order.isPositionTpsl ?? false,
 			reduceOnly: order.reduceOnly,
 			orderType: `${kind} ${execution}`,
 			tif: order.tif,

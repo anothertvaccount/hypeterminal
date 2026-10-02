@@ -30,6 +30,12 @@ export const CHASE_PLACE_MAX_RETRIES = 2;
 
 export interface ChaseEntry {
 	coin: string;
+	/** Exchange acknowledgment, available before the first openOrders snapshot. */
+	oid?: number;
+	cloid?: `0x${string}`;
+	/** Close intent handed to the engine before any placement has been attempted. */
+	placementPending?: boolean;
+	tif?: "Alo" | "Gtc";
 	/** Position dex — lets a close-mode chase look its position up (builder markets too). */
 	dex?: string;
 	side: "buy" | "sell";
@@ -106,12 +112,18 @@ export function isPostOnlyRaceError(message: string | null | undefined): boolean
 	return /post only|immediately matched/i.test(message);
 }
 
+/** A fill/cancel won the race with a chase modification; reconcile silently. */
+export function isChaseOrderGoneError(message: string | null | undefined): boolean {
+	return !!message && /cannot modify (?:canceled|cancelled) or filled order/i.test(message);
+}
+
 export interface ChaseOrderLike {
 	coin: string;
 	side: string;
 	origSz: string;
 	isTrigger: boolean;
 	reduceOnly: boolean;
+	sz?: string;
 }
 
 /** The resting order this chase entry manages: same coin, side, size; not a trigger. */
@@ -124,6 +136,23 @@ export function findChaseOrder<T extends ChaseOrderLike>(orders: readonly T[], e
 			!order.isTrigger &&
 			order.reduceOnly === entry.reduceOnly &&
 			String(order.origSz) === entry.sizeText,
+	);
+}
+
+/** Close sizes change after partial fills and native modifications. */
+export function findActiveChaseOrder<T extends ChaseOrderLike>(orders: readonly T[], entry: ChaseEntry): T | undefined {
+	return (
+		findChaseOrder(orders, entry) ??
+		(entry.mode === "close"
+			? orders.find(
+					(order) =>
+						order.coin === entry.coin &&
+						order.side === (entry.side === "buy" ? "B" : "A") &&
+						!order.isTrigger &&
+						order.reduceOnly &&
+						Number(order.sz) > 0,
+				)
+			: undefined)
 	);
 }
 

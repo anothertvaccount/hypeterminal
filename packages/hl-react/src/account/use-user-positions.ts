@@ -88,7 +88,7 @@ export function useUserPositions(): UserPositions {
 
 	const { data, status } = useSubscription("allDexsClearinghouseState", { user: address ?? "" }, { enabled });
 
-	const isLoading = enabled && (status === "subscribing" || status === "idle");
+	const isLoading = enabled && (status === "subscribing" || status === "idle" || (status === "active" && !data));
 	const hasError = status === "error";
 
 	if (!enabled) return EMPTY;

@@ -1,9 +1,10 @@
 import { Divider } from "@hypeterminal/ui";
 import { t } from "@lingui/core/macro";
+import { Trans } from "@lingui/react/macro";
 import { GithubLogoIcon, SpinnerGapIcon, WifiHighIcon, WifiSlashIcon } from "@phosphor-icons/react";
 import { ClientOnly } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { APP_VERSION, GITHUB_URL } from "@/config/app";
+import { APP_NAME, APP_VERSION, GITHUB_URL, LICENSE_URL } from "@/config/app";
 import { APP_BAR_BUTTON_HEIGHT_CLASS, APP_FOOTER_HEIGHT_CLASS } from "@/config/layout";
 import { cn } from "@/lib/cn";
 import { formatTime } from "@/lib/format";
@@ -92,11 +93,25 @@ export function FooterBar() {
 					<GithubLogoIcon className="size-2.5" />
 				</a>
 				<Divider orientation="vertical" className="my-1.5" />
+				{/* MIT requires the notice to travel with the software — say so where
+				    people look for it, and link the licence and the upstream it forks. */}
+				<a
+					href={LICENSE_URL}
+					target="_blank"
+					rel="noopener noreferrer"
+					className="text-3xs uppercase tracking-wider text-fg-muted transition-colors hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stroke-focus"
+					title={t`MIT licensed — open source, inspectable, no backend`}
+				>
+					<Trans>MIT</Trans>
+				</a>
 				<ClientOnly>
 					<FooterClock />
 				</ClientOnly>
 				<Divider orientation="vertical" className="my-1.5" />
 				<span className="text-fg">{APP_VERSION}</span>
+				<span className="text-3xs text-fg-muted">
+					<Trans>· fork of {APP_NAME}</Trans>
+				</span>
 			</div>
 		</footer>
 	);

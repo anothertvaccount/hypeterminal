@@ -37,7 +37,21 @@ export const STORAGE_KEYS = {
 
 export const RQ_CACHE_BUSTER = "v1";
 
-export const GITHUB_URL = "https://github.com/vipineth/hypeterminal/";
+/**
+ * This deployment runs the fork, so every "look at the source" link in the app
+ * points at the fork — the code people are inspecting is the code that ships here.
+ */
+export const GITHUB_URL = "https://github.com/anothertvaccount/hypeterminal/";
+
+/**
+ * The upstream project this is forked from. Kept for attribution: the MIT licence
+ * and copyright notice in LICENSE belong to the original authors and must be
+ * preserved, and "forked from" is the honest description of the lineage.
+ */
+export const UPSTREAM_GITHUB_URL = "https://github.com/vipineth/hypeterminal/";
+
+/** Where the MIT licence text lives in this repository. */
+export const LICENSE_URL = `${GITHUB_URL}blob/main/LICENSE`;
 export const TOKEN_ICON_BASE_URL = "https://app.hyperliquid.xyz/coins";
 
 export const LIFI_INTEGRATOR = "hypeterminal";

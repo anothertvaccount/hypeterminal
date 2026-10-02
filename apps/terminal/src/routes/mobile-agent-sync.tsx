@@ -31,8 +31,10 @@ import { useAgentWalletActions, useHyperliquid, writeAgentSessionAddress } from 
 import {
 	clearMobileSyncDraft,
 	isMobileSyncEnvelopeExpired,
+	markMobileSyncLinkConsumed,
 	readMobileSyncDraft,
 	saveMobileSyncDraft,
+	wasMobileSyncLinkConsumed,
 } from "@/lib/mobile-sync/draft-storage";
 import { isMobileSyncImportError, verifyImportedMobileAgent } from "@/lib/mobile-sync/import-verification";
 import {
@@ -107,6 +109,22 @@ function MobileAgentSyncRoute() {
 		(nextEnvelope: MobileSyncEnvelope, source: EnvelopeSource) => {
 			if (isMobileSyncEnvelopeExpired(nextEnvelope)) {
 				clearExpiredEnvelope();
+				return;
+			}
+			// Single-use on this device: a link that already imported a key here is spent.
+			// (See markMobileSyncLinkConsumed for why this is a device guard, not a
+			// security boundary — the chain-level answer is "Reset phone access".)
+			if (wasMobileSyncLinkConsumed(nextEnvelope.syncId)) {
+				clearMobileSyncDraft();
+				setEnvelope(null);
+				setEnvelopeSource(null);
+				setLoadError(
+					t`This link was already used on this phone. Create a new one on your desktop if you need another.`,
+				);
+				setSubmitError(null);
+				setPairingCode("");
+				setStatus({ state: "idle" });
+				setShowLinkInput(true);
 				return;
 			}
 
@@ -286,6 +304,8 @@ function MobileAgentSyncRoute() {
 			const { privateKey, publicKey, ...metadata } = verifiedAgent;
 
 			setAgent(imported.env, imported.userAddress, privateKey, publicKey, metadata);
+			// Spend the link: it cannot be imported again on this phone.
+			markMobileSyncLinkConsumed(imported.syncId);
 			clearMobileSyncDraft();
 			// Record which account this device trades: from here on the app loads its
 			// balances/positions and signs through this key with no wallet connected.
@@ -614,8 +634,8 @@ function LoadedLinkPanel({
 				</p>
 				<p>
 					<Trans>
-						Use "Forget this key" in Account to erase it here, or "Reset phone access" on desktop to revoke it
-						everywhere at once.
+						The code works for 3 minutes, and this phone will not accept the same link twice. Use "Forget this key" in
+						Account to erase it here, or "Reset phone access" on desktop to revoke it everywhere at once.
 					</Trans>
 				</p>
 			</div>

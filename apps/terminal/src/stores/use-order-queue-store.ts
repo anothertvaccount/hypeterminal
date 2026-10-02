@@ -8,6 +8,8 @@ export interface OrderQueueItem {
 	size: string;
 	price?: string;
 	orderType?: "market" | "limit" | "trigger" | "scale" | "twap";
+	/** Chase retries do not surface failed rows in the queue or its toast watcher. */
+	source?: "chase";
 	tpPrice?: string;
 	slPrice?: string;
 	status: "pending" | "success" | "failed";
@@ -37,6 +39,7 @@ const useOrderQueueStore = create<OrderQueueStore>()((set) => ({
 	actions: {
 		addOrder: (order) => {
 			const id = generateOrderId();
+			if (order.source === "chase" && order.status === "failed") return id;
 			const newOrder: OrderQueueItem = {
 				...order,
 				id,
@@ -49,15 +52,18 @@ const useOrderQueueStore = create<OrderQueueStore>()((set) => ({
 		},
 		updateOrder: (id, update) => {
 			set((state) => ({
-				orders: state.orders.map((order) =>
-					order.id === id
-						? {
-								...order,
-								...update,
-								completedAt: update.status === "success" || update.status === "failed" ? Date.now() : order.completedAt,
-							}
-						: order,
-				),
+				orders: state.orders
+					.map((order) =>
+						order.id === id
+							? {
+									...order,
+									...update,
+									completedAt:
+										update.status === "success" || update.status === "failed" ? Date.now() : order.completedAt,
+								}
+							: order,
+					)
+					.filter((order) => order.source !== "chase" || order.status !== "failed"),
 			}));
 		},
 		removeOrder: (id) => {

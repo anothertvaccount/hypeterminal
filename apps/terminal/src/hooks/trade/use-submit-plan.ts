@@ -81,7 +81,9 @@ export function useSubmitPlan(): UseSubmitPlanResult {
 			const orders = await paperOrdersAtMark(plan.orders, meta);
 			const split = splitPaperPlan(orders, meta, resolveMarket);
 			paperActions.applyPlan(split.fills, split.resting);
-			return derivePaperResult(plan.orders, split);
+			const result = derivePaperResult(plan.orders, split);
+			const resting = split.resting.find((order) => !order.isTrigger);
+			return result.ok && resting ? { ...result, oid: resting.oid } : result;
 		}
 		try {
 			if (import.meta.env.DEV) {
@@ -97,7 +99,10 @@ export function useSubmitPlan(): UseSubmitPlanResult {
 			const status = interpretOrderStatuses(result.response?.data?.statuses ?? []);
 			// Placements tick; fills announce through the userFills stream instead.
 			if (status.ok && status.outcome !== "filled") playActionSound();
-			return status;
+			const primary = result.response?.data?.statuses?.[0];
+			return status.ok && primary && typeof primary === "object" && "resting" in primary
+				? { ...status, oid: primary.resting.oid }
+				: status;
 		} catch (error) {
 			return { ok: false, error: error instanceof Error ? error.message : t`Order failed` };
 		}

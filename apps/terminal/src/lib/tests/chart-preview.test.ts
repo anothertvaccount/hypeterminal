@@ -11,7 +11,7 @@ describe("buildPreviewSegments", () => {
 	it("marks a long's limit draft as a buy preview", () => {
 		const { segments, isBuy } = buildPreviewSegments("limit", "buy");
 		expect(isBuy).toBe(true);
-		expect(segments.map((s) => s.text)).toEqual(["PREVIEW", "BUY LIMIT", "not in book until submitted"]);
+		expect(segments.map((s) => s.text)).toEqual(["PREVIEW", "BUY", "not in book until submitted"]);
 		expect(segments[0]).toMatchObject({ tone: "preview", filled: true });
 		expect(segments[1].key).toBe("preview");
 		expect(segments[2].tone).toBe("preview");
@@ -37,7 +37,7 @@ describe("buildPreviewSegments", () => {
 	it("titles follow the kind and side", () => {
 		expect(buildPreviewSegments("tp", "sell").segments[1].text).toBe("TAKE PROFIT");
 		expect(buildPreviewSegments("sl", "buy").segments[1].text).toBe("STOP LOSS");
-		expect(buildPreviewSegments("limit", "sell").segments[1].text).toBe("SELL LIMIT");
+		expect(buildPreviewSegments("limit", "sell").segments[1].text).toBe("SELL");
 	});
 });
 

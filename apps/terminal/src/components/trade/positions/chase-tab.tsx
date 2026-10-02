@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 
 import { HL_ALL_DEXS } from "@/config/app";
 import { PAPER_TRADE } from "@/config/paper";
-import { CHASE_TIMEOUT_MS, findChaseOrder } from "@/domain/trade/order/chase";
+import { ORDER_MIN_NOTIONAL_USD } from "@/config/trade";
+import { CHASE_TIMEOUT_MS, findActiveChaseOrder } from "@/domain/trade/order/chase";
 import { cn } from "@/lib/cn";
 import { formatDateTime } from "@/lib/format";
 import { useSubscription, useTradingSession } from "@/lib/hyperliquid";
@@ -13,6 +14,7 @@ import {
 	useChaseHistory,
 	useChaseOrderActions,
 } from "@/stores/use-chase-order-store";
+import { useMarketOrderSlippagePercent } from "@/stores/use-global-settings-store";
 import { usePaperOpenOrderRows } from "@/stores/use-paper-store";
 
 const OUTCOME_STYLES: Record<string, string> = {
@@ -49,10 +51,11 @@ function formatDuration(ms: number): string {
 export function ChaseTab() {
 	const entry = useChaseEntry();
 	const history = useChaseHistory();
-	const { clearHistory } = useChaseOrderActions();
+	const { clear, clearHistory } = useChaseOrderActions();
 	const { address, isActive } = useTradingSession();
 	const paperRows = usePaperOpenOrderRows();
 	const [now, setNow] = useState(() => Date.now());
+	const marketSlippagePercent = useMarketOrderSlippagePercent();
 
 	// Tick once a second while a chase is running (mounted tab only).
 	useEffect(() => {
@@ -68,7 +71,11 @@ export function ChaseTab() {
 		{ enabled: !PAPER_TRADE && isActive && entry !== null },
 	);
 	const orders: OpenOrder[] = PAPER_TRADE ? paperRows : (openOrdersEvent?.orders ?? []);
-	const activeOrder = entry ? findChaseOrder(orders, entry) : undefined;
+	const activeOrder = entry ? findActiveChaseOrder(orders, entry) : undefined;
+	const restingDustTail =
+		entry?.mode === "close" &&
+		activeOrder &&
+		Number(activeOrder.sz) * Number(activeOrder.limitPx) < ORDER_MIN_NOTIONAL_USD;
 
 	const elapsed = entry ? Math.max(0, now - entry.startedAt) : 0;
 	const progress = Math.min(100, (elapsed / CHASE_TIMEOUT_MS) * 100);
@@ -97,23 +104,41 @@ export function ChaseTab() {
 									<span className="text-2xs border border-stroke-weak rounded-xs px-1 text-fg-muted">RO</span>
 								)}
 								<span className="ml-auto text-2xs tabular-nums text-fg-muted">
-									{activeOrder ? `at ${activeOrder.limitPx}` : "filling…"}
+									{activeOrder ? `at ${activeOrder.limitPx}` : "checking order…"}
 								</span>
 							</div>
 							<div className="h-1 rounded-full bg-fill-hover overflow-hidden">
 								<div
-									className={cn("h-full transition-all", elapsed >= CHASE_TIMEOUT_MS ? "bg-error" : "bg-brand")}
-									style={{ width: `${progress}%` }}
+									className={cn(
+										"h-full transition-all",
+										entry.mode !== "close" && elapsed >= CHASE_TIMEOUT_MS ? "bg-error" : "bg-brand",
+									)}
+									style={{ width: `${entry.mode === "close" ? 100 : progress}%` }}
 								/>
 							</div>
 							<div className="flex justify-between text-2xs text-fg-muted tabular-nums">
 								<span>re-prices every 750ms to stay at the {entry.side === "buy" ? "best bid" : "best ask"}</span>
 								<span>
-									{formatDateTime(new Date(entry.startedAt))} · {formatDuration(elapsed)} /{" "}
-									{formatDuration(CHASE_TIMEOUT_MS)}
+									{formatDateTime(new Date(entry.startedAt))} · {formatDuration(elapsed)}
+									{entry.mode === "close" ? " · until position closes" : ` / ${formatDuration(CHASE_TIMEOUT_MS)}`}
 								</span>
 							</div>
-							{!activeOrder && <p className="text-2xs text-warning">Order not found — it may have just filled.</p>}
+							{!activeOrder && (
+								<p className="text-2xs text-fg-muted">
+									{entry.mode === "close"
+										? "Checking the order and remaining position — closing will resume when confirmed."
+										: "Waiting for the latest order update."}
+								</p>
+							)}
+							{restingDustTail && (
+								<p className="text-2xs text-warning">
+									The remainder is below $10. Chase will cancel the resting order and finish with a reduce-only market
+									close using your {marketSlippagePercent}% slippage setting.
+								</p>
+							)}
+							<button type="button" onClick={clear} className="text-2xs text-error hover:underline">
+								Stop Chase
+							</button>
 						</div>
 					)}
 				</section>

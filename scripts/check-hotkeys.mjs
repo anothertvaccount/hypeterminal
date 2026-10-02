@@ -84,7 +84,12 @@ const entryState = () =>
 const setEntry = (patch) => page.evaluate((p) => globalThis.__hlOrderEntry.getState().actions && Object.entries(p).forEach(([k, v]) => globalThis.__hlOrderEntry.getState().actions[`set${k[0].toUpperCase()}${k.slice(1)}`](v)), patch);
 
 try {
-	await page.goto("http://localhost:3000/", { waitUntil: "domcontentloaded" });
+	// The app is hosted on the VPS; point this at a base URL to check another host
+	// without editing the script. NOTE: it still needs a DEV server, because it reads
+	// the dev-only debug hooks (__hlChart / __hlPaper / __hlOrderEntry), which a
+	// production build does not expose.
+	const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
+	await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 	await page.waitForTimeout(5000);
 	await ensureDefaultCanvas(page);
 

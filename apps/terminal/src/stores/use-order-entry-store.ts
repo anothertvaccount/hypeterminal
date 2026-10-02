@@ -255,7 +255,7 @@ export const useOrderEntryStore = create<OrderEntryStore>()(
 					// Clears transient inputs after a submission — the size lives in the
 					// persisted slice now (remembered across reloads), so it is never touched
 					// here; prices/TP-SL/scale still clear.
-					resetForm: () => set({ ...DEFAULT_FORM }),
+					resetForm: () => set((state) => ({ ...DEFAULT_FORM, tif: state.tif })),
 
 					resetPrices: () =>
 						set({

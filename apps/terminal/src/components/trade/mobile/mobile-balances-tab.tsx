@@ -1,9 +1,9 @@
 import { Button, Checkbox } from "@hypeterminal/ui";
 import { t } from "@lingui/core/macro";
-import { ArrowsDownUpIcon, ArrowsLeftRightIcon, PaperPlaneTiltIcon, WalletIcon } from "@phosphor-icons/react";
+import { ArrowsDownUpIcon, WalletIcon } from "@phosphor-icons/react";
 import { Skeleton } from "boneyard-js/react";
-import { useMemo, useState } from "react";
-import { DEFAULT_QUOTE_TOKEN, HL_ALL_DEXS } from "@/config/app";
+import { useMemo } from "react";
+import { HL_ALL_DEXS } from "@/config/app";
 import { SMALL_BALANCE_THRESHOLD_USD } from "@/config/trade";
 import {
 	type BalanceRow,
@@ -21,31 +21,18 @@ import { toNumberOrZero } from "@/lib/trade/numbers";
 import { useSwapModalActions } from "@/stores/use-global-modal-store";
 import { useGlobalSettingsActions, useHideSmallBalances } from "@/stores/use-global-settings-store";
 import { AssetDisplay } from "../components/asset-display";
-import { SendModal } from "../positions/send-modal";
-import { TransferModal } from "../positions/transfer-modal";
 import { MetricCell } from "./metric-cell";
-
-type TransferDirection = "toSpot" | "toPerp";
 
 interface Props {
 	className?: string;
 }
 
 export function MobileBalancesTab({ className }: Props) {
-	const { isActive, isWallet } = useTradingSession();
+	const { isActive } = useTradingSession();
 	const { getToken } = useSpotTokens();
 	const hideSmallBalances = useHideSmallBalances();
 	const { setHideSmallBalances } = useGlobalSettingsActions();
 	const { open: openSwapModal } = useSwapModalActions();
-	const [transferState, setTransferState] = useState<{ open: boolean; direction: TransferDirection }>({
-		open: false,
-		direction: "toSpot",
-	});
-	const [sendState, setSendState] = useState<{ open: boolean; asset: string; accountType: "perp" | "spot" }>({
-		open: false,
-		asset: DEFAULT_QUOTE_TOKEN,
-		accountType: "spot",
-	});
 
 	const { perpSummary, spotBalances, spotAvailableAfterMaintenance, accountAbstraction, isLoading, hasError } =
 		useDefaultDexBalances();
@@ -85,15 +72,6 @@ export function MobileBalancesTab({ className }: Props) {
 		return { pnl, pnlPercent };
 	}
 
-	function handleTransferClick(row: BalanceRow) {
-		if (row.asset !== DEFAULT_QUOTE_TOKEN) return;
-		setTransferState({ open: true, direction: row.type === "perp" ? "toSpot" : "toPerp" });
-	}
-
-	function handleSendClick(row: BalanceRow) {
-		setSendState({ open: true, asset: row.asset, accountType: row.type });
-	}
-
 	if (!isActive) {
 		return (
 			<div className="flex-1 flex items-center justify-center p-6 text-sm text-fg-muted">
@@ -121,14 +99,10 @@ export function MobileBalancesTab({ className }: Props) {
 	function renderBalanceCard(row: BalanceRow) {
 		const token = getToken(row.asset);
 		const decimals = row.type === "perp" ? 2 : (token?.szDecimals ?? 2);
-		// Transfer/Send are user-signed actions (usdClassTransfer/sendAsset) that an
 		// agent key cannot sign — a linked Phone Access session is trade-only, so
 		// don't offer buttons that can only fail. Swap and perp trading are L1
 		// actions and work fine.
-		const canTransfer = isWallet && row.asset === DEFAULT_QUOTE_TOKEN && parseFloat(row.available) > 0;
 		const canSwap = row.type === "spot" && parseFloat(row.available) > 0;
-		const canSend = isWallet && parseFloat(row.available) > 0;
-		const transferLabel = row.type === "perp" ? t`To Spot` : t`To Perp`;
 		const pnlData = getPnl(row);
 
 		return (
@@ -154,20 +128,8 @@ export function MobileBalancesTab({ className }: Props) {
 					<MetricCell label={t`Total`} value={formatToken(row.total, decimals)} />
 				</div>
 
-				{(canTransfer || canSwap || canSend) && (
+				{canSwap && (
 					<div className="flex items-center gap-2 px-3 py-1.5">
-						{canTransfer && (
-							<Button
-								variant="outline"
-								intent="neutral"
-								size="sm"
-								className="touch-target"
-								onClick={() => handleTransferClick(row)}
-								iconLeft={<ArrowsLeftRightIcon className="size-3.5" />}
-							>
-								{transferLabel}
-							</Button>
-						)}
 						{canSwap && (
 							<Button
 								variant="outline"
@@ -178,18 +140,6 @@ export function MobileBalancesTab({ className }: Props) {
 								iconLeft={<ArrowsDownUpIcon className="size-3.5" />}
 							>
 								{t`Swap`}
-							</Button>
-						)}
-						{canSend && (
-							<Button
-								variant="outline"
-								intent="neutral"
-								size="sm"
-								onClick={() => handleSendClick(row)}
-								className="ml-auto touch-target"
-								iconLeft={<PaperPlaneTiltIcon className="size-3.5" />}
-							>
-								{t`Send`}
 							</Button>
 						)}
 					</div>
@@ -228,18 +178,6 @@ export function MobileBalancesTab({ className }: Props) {
 						</>
 					)}
 				</div>
-
-				<TransferModal
-					open={transferState.open}
-					onOpenChange={(open) => setTransferState((prev) => ({ ...prev, open }))}
-					initialDirection={transferState.direction}
-				/>
-				<SendModal
-					open={sendState.open}
-					onOpenChange={(open) => setSendState((prev) => ({ ...prev, open }))}
-					initialAsset={sendState.asset}
-					initialAccountType={sendState.accountType}
-				/>
 			</div>
 		</Skeleton>
 	);

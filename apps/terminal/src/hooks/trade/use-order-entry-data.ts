@@ -29,6 +29,7 @@ interface OrderEntryData extends OrderEntryDerived {
 	resetPendingLeverage: () => void;
 	marginMode: "cross" | "isolated";
 	hasPosition: boolean;
+	reduceOnlyPositionSzi: number | null;
 	switchMarginMode: (mode: "cross" | "isolated") => Promise<void>;
 	applyMarginAndLeverage: (mode: "cross" | "isolated", leverageValue: number) => Promise<void>;
 	isSwitchingMode: boolean;
@@ -109,6 +110,12 @@ export function useOrderEntryData({
 	const reduceOnlyPosition =
 		reduceOnlyApplies && market ? userPositions.getPosition(market.name, getPositionDex(market)) : null;
 	const reduceOnlyPositionSize = reduceOnlyPosition ? Math.abs(toNumber(reduceOnlyPosition.szi) ?? 0) : 0;
+	const reduceOnlyPositionSzi =
+		userPositions.isLoading || userPositions.hasError
+			? null
+			: reduceOnlyPosition
+				? toNumber(reduceOnlyPosition.szi)
+				: 0;
 	let openBuySize = 0;
 	if (reduceOnlyApplies && !reduceOnlyPosition && market) {
 		if (PAPER_TRADE) {
@@ -164,6 +171,7 @@ export function useOrderEntryData({
 		marginMode,
 		hasPosition,
 		switchMarginMode,
+		reduceOnlyPositionSzi,
 		applyMarginAndLeverage,
 		isSwitchingMode,
 		switchModeError,

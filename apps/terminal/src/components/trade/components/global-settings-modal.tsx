@@ -17,7 +17,7 @@ import { XIcon } from "@phosphor-icons/react";
 import type { ChangeEvent, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { NumberInput } from "@/components/ui/number-input";
-import { HOTKEYS, RESERVED_CHART_KEYS_NOTE } from "@/config/hotkeys";
+import { HOTKEYS } from "@/config/hotkeys";
 import { type LocaleCode, localeList, type NumberFormatLocale, numberFormatLocaleList } from "@/config/i18n";
 import {
 	DEFAULT_SIZE_BUTTON_AMOUNTS,
@@ -383,18 +383,21 @@ function HotkeysSettingsSection() {
 				})}
 			</SettingsGroup>
 
-			<SettingsGroup label={t`Not configurable`}>
-				{readOnly.map((hotkey) => (
-					<SettingRow key={hotkey.id} label={hotkey.label} hint={hotkey.note}>
-						<span className="text-2xs text-fg-muted font-mono">
-							{hotkey.combo !== null ? comboDisplay(hotkey.combo) : "—"}
-						</span>
-					</SettingRow>
-				))}
-			</SettingsGroup>
+			{/* Only render when something is actually read-only — the group is empty
+			    now that the unimplemented keys are gone from the config. */}
+			{readOnly.length > 0 && (
+				<SettingsGroup label={t`Not configurable`}>
+					{readOnly.map((hotkey) => (
+						<SettingRow key={hotkey.id} label={hotkey.label} hint={hotkey.note}>
+							<span className="text-2xs text-fg-muted font-mono">
+								{hotkey.combo !== null ? comboDisplay(hotkey.combo) : "—"}
+							</span>
+						</SettingRow>
+					))}
+				</SettingsGroup>
+			)}
 
 			<p className="text-2xs text-fg-muted text-pretty">
-				{RESERVED_CHART_KEYS_NOTE}{" "}
 				{t`Click a key chip and press the new key; Esc cancels. Press ? in the terminal for the shortcut help.`}
 			</p>
 		</div>

@@ -13,6 +13,12 @@ export interface CancelOpenOrdersResult {
 	errors: string[];
 }
 
+export interface CancelOpenOrdersOptions {
+	source?: "chase";
+	/** Hide Hyperliquid's expected missing-order race when a caller will reconcile it. */
+	suppressExpectedMissing?: boolean;
+}
+
 /**
  * Cancels resting orders — one path shared by the chart's ✕ buttons, the
  * X/U/I/O/P hotkeys, and the nuke. Preview: local store removal. Live: one exchange
@@ -20,14 +26,17 @@ export interface CancelOpenOrdersResult {
  * surface both as an order-queue row and in the returned result so callers that
  * report counts (the nuke dialog) stay truthful.
  */
-export function useCancelOpenOrders(): (orders: readonly OpenOrder[]) => Promise<CancelOpenOrdersResult> {
+export function useCancelOpenOrders(): (
+	orders: readonly OpenOrder[],
+	options?: CancelOpenOrdersOptions,
+) => Promise<CancelOpenOrdersResult> {
 	const paperActions = usePaperActions();
 	const markets = useMarkets();
 	const { mutateAsync: cancelExchange } = useExchange("cancel");
 	const { addOrder } = useOrderQueueActions();
 
 	return useCallback(
-		async (orders: readonly OpenOrder[]): Promise<CancelOpenOrdersResult> => {
+		async (orders: readonly OpenOrder[], options?: CancelOpenOrdersOptions): Promise<CancelOpenOrdersResult> => {
 			if (orders.length === 0) return { cancelled: 0, errors: [] };
 			if (PAPER_TRADE) {
 				paperActions.cancelOrders(orders.map((order) => order.oid));
@@ -48,8 +57,11 @@ export function useCancelOpenOrders(): (orders: readonly OpenOrder[]) => Promise
 				return { cancelled: cancels.length, errors };
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Failed to cancel order";
+				if (options?.suppressExpectedMissing && /order was never placed, already canceled, or filled/i.test(message))
+					return { cancelled: 0, errors };
 				const first = orders[0];
 				addOrder({
+					source: options?.source,
 					market: first.coin,
 					side: first.side === "B" ? "buy" : "sell",
 					size: first.sz,

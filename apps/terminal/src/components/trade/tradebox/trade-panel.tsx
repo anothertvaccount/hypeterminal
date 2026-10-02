@@ -95,6 +95,7 @@ export function TradePanel() {
 		capabilities,
 		availableBalance,
 		maxSize,
+		reduceOnlyPositionSzi,
 		sizeValue,
 		orderValue,
 		sideLabels,
@@ -238,6 +239,8 @@ export function TradePanel() {
 			: perpInput(baseInput, {
 					orderType,
 					markPx,
+					reduceOnly,
+					reduceOnlyPositionSzi,
 					maxSize,
 					usesTriggerPrice: usesLimitPriceForOrder(orderType) ? false : isTriggerOrderType(orderType),
 					triggerPriceNum,

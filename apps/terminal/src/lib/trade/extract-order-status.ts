@@ -1,6 +1,6 @@
 export type OrderOutcome = "filled" | "resting" | "triggerSet" | "twapStarted";
 
-export type OrderResult = { ok: true; outcome: OrderOutcome } | { ok: false; error: string };
+export type OrderResult = { ok: true; outcome: OrderOutcome; oid?: number } | { ok: false; error: string };
 
 export const NO_EXCHANGE_RESPONSE = "No response from exchange";
 

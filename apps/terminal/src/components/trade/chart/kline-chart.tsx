@@ -16,6 +16,7 @@ import { CANDLE_PANE_ID } from "@/lib/chart/price-axis";
 import { getInfoClient, useSubscription } from "@/lib/hyperliquid";
 import type { ChartSource, ChartSourceToggleIntentHandlers } from "./chart-source-toggle";
 import { KlineToolbar } from "./kline-toolbar";
+import { OrderTifMenu } from "./order-tif-menu";
 import { type AxisMenuAdapter, PriceAxisMenu } from "./price-axis-menu";
 import { useKlineFormPreviewOverlays } from "./use-kline-form-preview-overlays";
 import { useKlineOrderOverlays } from "./use-kline-order-overlays";
@@ -268,7 +269,7 @@ export function KlineChart({
 		}
 	}, [candleData.data]);
 
-	useKlineOrderOverlays({ chartRef, chartEpoch, symbol, dex: positionDex });
+	const { tifMenu, openTifMenu, applyTif } = useKlineOrderOverlays({ chartRef, chartEpoch, symbol, dex: positionDex });
 	useKlinePositionOverlays({ chartRef, chartEpoch, symbol, dex: positionDex });
 	useKlineFormPreviewOverlays({ chartRef, chartEpoch, symbol });
 
@@ -313,6 +314,14 @@ export function KlineChart({
 			<PriceAxisMenu adapter={axisAdapter} symbol={symbol} dex={positionDex}>
 				<div ref={containerRef} className="absolute inset-0" />
 			</PriceAxisMenu>
+			{/* The order-type menu is a DOM popup — the klinecharts canvas cannot host it. */}
+			<OrderTifMenu
+				anchor={tifMenu}
+				onClose={() => openTifMenu(null)}
+				onPick={(tif) => {
+					if (tifMenu) applyTif(tifMenu.order, tif);
+				}}
+			/>
 		</div>
 	);
 }

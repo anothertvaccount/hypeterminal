@@ -136,6 +136,44 @@ function isMobileSyncEnvelopeExpiredAt(expiresAtMs: number, nowMs: number): bool
 	return nowMs > expiresAtMs + MOBILE_SYNC_CLOCK_SKEW_MS;
 }
 
+/**
+ * Remembers which links this device has already imported, so a link that sits in a
+ * phone's history (or gets re-opened) cannot be used a second time on the same
+ * browser. This is a device-level guard, not a security boundary: the code alone
+ * still unlocks the key on any OTHER device until the link expires. The
+ * authoritative revocation is the desktop's "Reset phone access", and expiry.
+ */
+const CONSUMED_KEY = "hypeterminal.mobile-sync.consumed.v1";
+const CONSUMED_LIMIT = 20;
+
+export function markMobileSyncLinkConsumed(syncId: string, options: { storage?: Storage } = {}): void {
+	const storage = getDraftStorage(options.storage);
+	if (!storage) return;
+	try {
+		const raw = storage.getItem(CONSUMED_KEY);
+		const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+		const list = new Set(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : []);
+		list.add(syncId);
+		// Bounded: only the most recent links can be recognised as already imported.
+		const trimmed = [...list].slice(-CONSUMED_LIMIT);
+		storage.setItem(CONSUMED_KEY, JSON.stringify(trimmed));
+	} catch {
+		// A storage failure must never block an import; it only costs us the guard.
+	}
+}
+
+export function wasMobileSyncLinkConsumed(syncId: string, options: { storage?: Storage } = {}): boolean {
+	const storage = getDraftStorage(options.storage);
+	if (!storage) return false;
+	try {
+		const raw = storage.getItem(CONSUMED_KEY);
+		const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+		return Array.isArray(parsed) && parsed.includes(syncId);
+	} catch {
+		return false;
+	}
+}
+
 function getDraftStorage(storage?: Storage | null): Storage | null {
 	if (storage !== undefined) return storage;
 	if (typeof window === "undefined") return null;

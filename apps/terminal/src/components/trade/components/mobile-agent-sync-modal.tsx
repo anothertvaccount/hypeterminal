@@ -658,10 +658,10 @@ function LinkSecurityExplainer({ agentExpiresLabel }: { agentExpiresLabel: strin
 					</p>
 					<p>
 						<Trans>
-							The encrypted data sits after the # in the URL. Browsers never send that part to a web server, and this
-							site is static — there is no backend that could store your key, and nothing about your key is uploaded
-							here. The only thing sent anywhere is your account address, to Hyperliquid's public API, to check the key
-							is approved.
+							The encrypted data sits after # in the URL, so it is not included in the HTTP request for the page. This
+							flow does not upload the encrypted payload or pairing code. The app sends your account address to
+							Hyperliquid to check the key is approved; approval, trading actions and account queries also go to
+							Hyperliquid. Wallet connector and RPC services may receive connection data and retain logs.
 						</Trans>{" "}
 						<a
 							href={GITHUB_URL}
@@ -670,22 +670,22 @@ function LinkSecurityExplainer({ agentExpiresLabel }: { agentExpiresLabel: strin
 							className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stroke-focus"
 						>
 							<GithubLogoIcon className="size-3" aria-hidden />
-							<Trans>
-								Open source — browse the repository: there is no server-side code here that could hold your key.
-							</Trans>
+							<Trans>Read the source</Trans>
 						</a>
 					</p>
 					<p>
 						<Trans>
-							The code stops working after 10 minutes. The key can keep trading until {agentExpiresLabel} (30 days from
-							approval), and it can place orders but never withdraw.
+							The link expires after 3 minutes. It can still be imported on another device before it expires. The key
+							can keep trading until {agentExpiresLabel} (30 days from approval), and it can place orders but cannot
+							withdraw funds.
 						</Trans>
 					</p>
 					<p>
 						<Trans>
-							On the phone the key is stored in that browser only. "Forget this key" clears it from the phone; "Reset
-							phone access" here revokes it everywhere at once. Anyone holding both the link and the code can trade this
-							account, so treat them like a password.
+							After import, the decrypted trading key is stored unencrypted in the phone's browser storage. "Forget this
+							key" clears that local copy without revoking its Hyperliquid approval. "Reset phone access" replaces the
+							approved Phone Access key on Hyperliquid. Anyone holding both the link and the code can import the trading
+							key before the link expires, so treat them like a password.
 						</Trans>
 					</p>
 				</div>

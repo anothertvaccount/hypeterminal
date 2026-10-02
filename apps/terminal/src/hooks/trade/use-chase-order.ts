@@ -1,3 +1,4 @@
+import { ApiRequestError } from "@nktkas/hyperliquid";
 import { useEffect, useRef } from "react";
 import { HL_ALL_DEXS } from "@/config/app";
 import { PAPER_TRADE } from "@/config/paper";
@@ -5,19 +6,35 @@ import type { ChaseEntry } from "@/domain/trade/order/chase";
 import {
 	CHASE_MODIFY_INTERVAL_MS,
 	CHASE_TIMEOUT_MS,
+	CHASE_TRACK_GRACE_MS,
 	chaseBehindMarkPrice,
-	findChaseOrder,
+	chaseBookTouch,
+	findActiveChaseOrder,
+	isChaseOrderGoneError,
 	isPostOnlyRaceError,
 	nextCloseChaseAction,
 	resolveChaseOutcome,
 	shouldCancelChase,
 	shouldWaitForOrderSnapshot,
 } from "@/domain/trade/order/chase";
-import { formatPriceForOrder, formatSizeForOrder, throwIfResponseError } from "@/domain/trade/orders";
+import { getExecutedPrice } from "@/domain/trade/order/price";
+import { formatPriceForOrder, formatSizeForOrder, throwIfAnyResponseError } from "@/domain/trade/orders";
 import { useCancelOpenOrders } from "@/hooks/trade/use-cancel-open-orders";
-import { useExchange, useMarkets, useSubscription, useTradingSession, useUserPositions } from "@/lib/hyperliquid";
+import { useChaseBook } from "@/hooks/trade/use-chase-book";
+import { useSubmitPlan } from "@/hooks/trade/use-submit-plan";
+import {
+	getInfoClient,
+	useExchange,
+	useMarkets,
+	useSubscription,
+	useTradingSession,
+	useUserPositions,
+} from "@/lib/hyperliquid";
 import type { OpenOrder } from "@/lib/trade/open-orders";
+import { orderEvidenceScope } from "@/lib/trade/order-evidence";
+import { orderOperationLock } from "@/lib/trade/order-operation-lock";
 import { useChaseOrderStore } from "@/stores/use-chase-order-store";
+import { useMarketOrderSlippageBps } from "@/stores/use-global-settings-store";
 import { useOrderQueueActions } from "@/stores/use-order-queue-store";
 import { usePaperActions, usePaperOpenOrderRows, usePaperTradingStore } from "@/stores/use-paper-store";
 
@@ -31,18 +48,20 @@ interface BookLevel {
  * every CHASE_MODIFY_INTERVAL_MS and retires the entry when the order disappears
  * (i.e. it filled — the fill chime already fired). Entry chases cancel after
  * CHASE_TIMEOUT_MS; CLOSE chases (mode "close", derived from reduceOnly) never time
- * out — they ride the touch until the position is flat, and stop with an explicit
- * message when the remainder drops below what an order can even express (Hyperliquid's
- * $10 minimum / the market's size step) instead of stranding dust silently.
+ * out — they ride the touch until the position is flat. A representable sub-$10 tail
+ * is closed with a reduce-only market order after its resting limit is verified gone.
+ * A remainder below the market's size step is reported because it cannot be encoded.
  * The first re-price runs immediately to shrink the window before the book is known.
  */
 export function useChaseOrderEngine(): void {
 	const { address, isActive } = useTradingSession();
+	const sessionRef = useRef({ address, isActive });
+	sessionRef.current = { address, isActive };
 	const markets = useMarkets();
 	// `positionsLoaded` matters: a lookup that returns null because the snapshot is
 	// still in flight is NOT the same as a flat position, and treating it as flat
 	// cancelled a live close chase and retired it as "completed".
-	const { getPosition, isLoading: positionsLoading } = useUserPositions();
+	const { getPosition, isLoading: positionsLoading, hasError: positionsError } = useUserPositions();
 	// useSubmitPlan returns a FRESH closure every render, and the position
 	// accessors are bound per render. Listing either in this effect's deps re-ran
 	// the effect on every render — and its cleanup cancels the resting order, so a
@@ -52,11 +71,24 @@ export function useChaseOrderEngine(): void {
 	const getPositionRef = useRef(getPosition);
 	getPositionRef.current = getPosition;
 	const positionsLoadingRef = useRef(positionsLoading);
-	positionsLoadingRef.current = positionsLoading;
+	positionsLoadingRef.current = positionsLoading || positionsError;
 	const cancelOpenOrders = useCancelOpenOrders();
+	const cancelOpenOrdersRef = useRef(cancelOpenOrders);
+	cancelOpenOrdersRef.current = cancelOpenOrders;
+	const marketsRef = useRef(markets);
+	marketsRef.current = markets;
 	const { addOrder } = useOrderQueueActions();
 	const { mutateAsync: batchModify } = useExchange("batchModify");
+	const { mutateAsync: placeOrder } = useExchange("order");
+	const marketSlippageBps = useMarketOrderSlippageBps();
+	const marketSlippageBpsRef = useRef(marketSlippageBps);
+	marketSlippageBpsRef.current = marketSlippageBps;
+	const { submitPlan } = useSubmitPlan();
+	const submitPlanRef = useRef(submitPlan);
+	submitPlanRef.current = submitPlan;
 	const entry = useChaseOrderStore((state) => state.entry);
+	const entryOwnerRef = useRef({ entry, address });
+	if (entryOwnerRef.current.entry !== entry) entryOwnerRef.current = { entry, address };
 	const paperRows = usePaperOpenOrderRows();
 	const paperActions = usePaperActions();
 
@@ -65,7 +97,7 @@ export function useChaseOrderEngine(): void {
 		{ user: address ?? "0x0", dex: HL_ALL_DEXS },
 		{ enabled: !PAPER_TRADE && isActive },
 	);
-	const { data: bookEvent } = useSubscription("l2Book", { coin: entry?.coin ?? "" }, { enabled: entry !== null });
+	const bookEvent = useChaseBook(entry?.coin);
 	const { data: midsEvent } = useSubscription("allMids", { dex: HL_ALL_DEXS }, { enabled: entry !== null });
 
 	const ordersRef = useRef<OpenOrder[]>([]);
@@ -78,7 +110,6 @@ export function useChaseOrderEngine(): void {
 	const rawMark = entry !== null ? midsEvent?.mids?.[entry.coin] : undefined;
 	const parsedMark = rawMark !== undefined ? Number(rawMark) : Number.NaN;
 	markRef.current = Number.isFinite(parsedMark) && parsedMark > 0 ? parsedMark : undefined;
-	const lastSentRef = useRef(0);
 	/** Last seen resting order — oid + price feed the history record. */
 	const lastOrderRef = useRef<{ oid: number; price: string } | null>(null);
 	/** True once this entry recorded its own outcome (timeout/fill/cancel). */
@@ -86,11 +117,64 @@ export function useChaseOrderEngine(): void {
 	/** One queue row per chase for re-price failures — retries stay silent. */
 	const modifyErrorLoggedRef = useRef(false);
 	useEffect(() => {
-		lastSentRef.current = 0;
 		lastOrderRef.current = null;
 		retiredRef.current = false;
 		modifyErrorLoggedRef.current = false;
 		if (!entry) return;
+		let disposed = false;
+		let pending: Promise<void> | undefined;
+		let trackedOid = entry.oid;
+		let neverPlaced = entry.placementPending === true && entry.mode === "close";
+		let trackedCloid: string | undefined = entry.cloid;
+		let trackedTif = entry.tif ?? "Alo";
+		let acknowledgedOrder: OpenOrder | undefined;
+		let knownOrder: OpenOrder | undefined;
+		let acknowledgedAt = 0;
+		let pendingCloid: `0x${string}` | undefined;
+		let nextDustCloseAttemptAt = 0;
+		const endedOids = new Set<number>();
+		const isCurrent = () =>
+			!disposed &&
+			useChaseOrderStore.getState().entry === entry &&
+			(PAPER_TRADE ||
+				(sessionRef.current.isActive &&
+					sessionRef.current.address === address &&
+					entryOwnerRef.current.address === address));
+		const remember = (order: OpenOrder, acknowledged = false) => {
+			neverPlaced = false;
+			knownOrder = order;
+			trackedOid = order.oid;
+			if (order.cloid) trackedCloid = order.cloid;
+			if (order.tif === "Alo" || order.tif === "Gtc") trackedTif = order.tif;
+			lastOrderRef.current = { oid: order.oid, price: order.limitPx };
+			acknowledgedOrder = acknowledged ? order : undefined;
+			acknowledgedAt = Date.now();
+		};
+		const recoveryOrder = (rows: OpenOrder[]) =>
+			rows.find(
+				(row) =>
+					!endedOids.has(row.oid) &&
+					row.coin === entry.coin &&
+					row.side === (entry.side === "buy" ? "B" : "A") &&
+					row.reduceOnly &&
+					!row.isTrigger &&
+					(row.oid === trackedOid || (!!trackedCloid && row.cloid === trackedCloid)),
+			);
+		const logFailure = (message: string, size = entry.sizeText, price = lastOrderRef.current?.price) => {
+			if (!isCurrent() || modifyErrorLoggedRef.current) return;
+			modifyErrorLoggedRef.current = true;
+			addOrder({
+				source: "chase",
+				market: entry.coin,
+				side: entry.side,
+				size,
+				price,
+				orderType: "limit",
+				status: "failed",
+				error: message,
+				completedAt: Date.now(),
+			});
+		};
 
 		const timeoutMs =
 			(import.meta.env.DEV ? (globalThis as { __chaseTimeoutMs?: number }).__chaseTimeoutMs : undefined) ??
@@ -107,23 +191,6 @@ export function useChaseOrderEngine(): void {
 			return remaining === null ? null : { szi: remaining.szi, closeable: remaining.size };
 		}
 
-		/**
-		 * Any resting reduce-only order for this coin on the chase's side, regardless of
-		 * remaining size. Partial fills shrink the order, so the entry's original size
-		 * no longer matches and an exact lookup would treat our own order as gone.
-		 */
-		function findRestingCloseOrder(orders: readonly OpenOrder[], entry: ChaseEntry): OpenOrder | undefined {
-			const wantedSide = entry.side === "buy" ? "B" : "A";
-			return orders.find(
-				(order) =>
-					order.coin === entry.coin &&
-					order.side === wantedSide &&
-					!order.isTrigger &&
-					order.reduceOnly === entry.reduceOnly &&
-					Number(order.sz) > 0,
-			);
-		}
-
 		function remainingToClose(entry: ChaseEntry): { size: string; szi: number } | null {
 			if (positionsLoadingRef.current) return null;
 			const short = entry.coin.includes(":") ? entry.coin.slice(entry.coin.indexOf(":") + 1) : entry.coin;
@@ -131,12 +198,289 @@ export function useChaseOrderEngine(): void {
 			if (!pos) return { size: "0", szi: 0 };
 			const szi = Number(pos.szi);
 			if (!Number.isFinite(szi) || szi === 0) return { size: "0", szi: 0 };
-			return { size: formatSizeForOrder(Math.abs(szi), markets.getSzDecimals(entry.coin)), szi };
+			return { size: formatSizeForOrder(Math.abs(szi), marketsRef.current.getSzDecimals(entry.coin)), szi };
+		}
+
+		function finishClose(
+			current: ChaseEntry,
+			remaining: { size: string; szi: number },
+			unrepresentable: boolean,
+			price: string,
+		) {
+			useChaseOrderStore.getState().actions.pushHistory({
+				coin: current.coin,
+				side: current.side,
+				size: current.sizeText,
+				reduceOnly: true,
+				startedAt: current.startedAt,
+				endedAt: Date.now(),
+				outcome: unrepresentable ? "error" : "completed",
+				price,
+			});
+			if (unrepresentable)
+				logFailure(
+					`${Math.abs(remaining.szi)} ${current.coin} remains — below this market's size precision, so it cannot be submitted as an order`,
+					remaining.size,
+					price,
+				);
+			lastOrderRef.current = null;
+			retiredRef.current = true;
+			useChaseOrderStore.getState().actions.clear();
+		}
+
+		async function recoverClose(current: ChaseEntry, restingDustOrder?: OpenOrder): Promise<void> {
+			if (!PAPER_TRADE && (!address || !isActive)) return;
+			const info = getInfoClient();
+			const scope = orderEvidenceScope(info, address ?? "paper");
+			const lockedOid = trackedOid;
+			const token = lockedOid === undefined ? undefined : orderOperationLock.acquire(scope, lockedOid);
+			if (lockedOid !== undefined && !token) return;
+			let submitted = false;
+			let definiteRejection = false;
+			let dustMarketAttempt = false;
+			try {
+				if (restingDustOrder) {
+					if (PAPER_TRADE) {
+						paperActions.cancelOrders([restingDustOrder.oid]);
+					} else {
+						if (!address) return;
+						const before = await info.orderStatus(
+							{ user: address, oid: restingDustOrder.oid },
+							AbortSignal.timeout(1500),
+						);
+						if (!isCurrent() || before.status !== "order") return;
+						if (before.order.status === "open") {
+							const result = await cancelOpenOrdersRef.current([restingDustOrder], {
+								source: "chase",
+								suppressExpectedMissing: true,
+							});
+							if (!isCurrent() || result.errors.length > 0) {
+								if (result.errors.length > 0) logFailure(result.errors.join("; "));
+								return;
+							}
+							const after = await info.orderStatus(
+								{ user: address, oid: restingDustOrder.oid },
+								AbortSignal.timeout(1500),
+							);
+							if (!isCurrent() || after.status !== "order" || after.order.status === "open") return;
+						}
+					}
+					endedOids.add(restingDustOrder.oid);
+				}
+				let remaining: { size: string; szi: number } | null;
+				if (PAPER_TRADE) {
+					if (!neverPlaced && (trackedOid === undefined || !usePaperTradingStore.getState().outcomeByOid[trackedOid]))
+						return;
+					remaining = remainingToClose(current);
+				} else {
+					if (!address) return;
+					// A lost placement response must be reconciled by its CLOID, never retried blindly.
+					if (pendingCloid) {
+						const status = await info.orderStatus({ user: address, oid: pendingCloid }, AbortSignal.timeout(1500));
+						if (!isCurrent() || status.status !== "order") return;
+						pendingCloid = undefined;
+						trackedOid = status.order.order.oid;
+						if (status.order.status === "open") {
+							remember(status.order.order, true);
+							return;
+						}
+						endedOids.add(trackedOid);
+					}
+					const dex = current.dex ?? (current.coin.includes(":") ? current.coin.split(":")[0] : "");
+					const rows = await info.frontendOpenOrders({ user: address, dex }, AbortSignal.timeout(1500));
+					if (!isCurrent()) return;
+					const existing = recoveryOrder(rows);
+					if (existing) {
+						remember(existing, true);
+						return;
+					}
+					// Older entries without a CLOID cannot identify a lost modify ACK.
+					// Wait rather than take over another reduce-only order or duplicate it.
+					if (
+						!neverPlaced &&
+						!trackedCloid &&
+						findActiveChaseOrder(
+							rows.filter((row) => !endedOids.has(row.oid)),
+							current,
+						)
+					)
+						return;
+					if (trackedOid === undefined && !neverPlaced) return; // Unknown submissions need identity proof.
+					if (trackedOid !== undefined) {
+						const status = await info.orderStatus({ user: address, oid: trackedOid }, AbortSignal.timeout(1500));
+						if (!isCurrent() || (status.status !== "order" && !endedOids.has(trackedOid))) return;
+						if (status.status === "order" && status.order.status === "open" && !endedOids.has(trackedOid)) {
+							remember(status.order.order, true);
+							return;
+						}
+						endedOids.add(trackedOid);
+					}
+					// Terminal order proof precedes the fresh position read, so partial fills
+					// cannot cause the original full size to be posted again.
+					const state = await info.clearinghouseState({ user: address, dex }, AbortSignal.timeout(1500));
+					const short = current.coin.split(":").at(-1);
+					const position = state.assetPositions.find(
+						({ position }) => position.coin === current.coin || position.coin === short,
+					)?.position;
+					const szi = Number(position?.szi ?? "0");
+					if (!Number.isFinite(szi)) return;
+					remaining = { szi, size: formatSizeForOrder(Math.abs(szi), marketsRef.current.getSzDecimals(current.coin)) };
+					// Recheck for a replacement that arrived while the order/position reads ran.
+					const fresh = await info.frontendOpenOrders({ user: address, dex }, AbortSignal.timeout(1500));
+					if (!isCurrent()) return;
+					const replacement = recoveryOrder(fresh);
+					if (replacement) {
+						remember(replacement, true);
+						return;
+					}
+					if (
+						!neverPlaced &&
+						!trackedCloid &&
+						findActiveChaseOrder(
+							fresh.filter((row) => !endedOids.has(row.oid)),
+							current,
+						)
+					)
+						return;
+				}
+				if (!isCurrent() || remaining === null || positionsLoadingRef.current) return;
+				const touch =
+					chaseBookTouch(current.side, bookRef.current?.levels) ??
+					(PAPER_TRADE && markRef.current !== undefined
+						? chaseBehindMarkPrice(current.side, markRef.current, marketsRef.current.getSzDecimals(current.coin))
+						: null);
+				const priceReference = markRef.current ?? touch;
+				if (priceReference === null || priceReference === undefined) return;
+				if (remaining.szi !== 0 && remaining.szi > 0 !== (current.side === "sell")) {
+					logFailure("Position changed side — Chase Close stopped");
+					retiredRef.current = true;
+					useChaseOrderStore.getState().actions.clear();
+					return;
+				}
+				const action = nextCloseChaseAction({
+					remaining: toDecisionInput(remaining),
+					markPx: priceReference,
+				});
+				if (action === "completed") {
+					finishClose(current, remaining, false, String(priceReference));
+					return;
+				}
+				if (action !== "replace" && action !== "dust") return;
+				if (action === "replace" && touch === null) return;
+				if (action === "dust" && Number(remaining.size) <= 0) {
+					finishClose(current, remaining, true, String(priceReference));
+					return;
+				}
+				if (action === "dust" && Date.now() < nextDustCloseAttemptAt) return;
+				const assetId = marketsRef.current.getAssetId(current.coin);
+				if (typeof assetId !== "number") return;
+				const cloid = `0x${crypto.randomUUID().replaceAll("-", "")}` as const;
+				dustMarketAttempt = action === "dust";
+				const price =
+					action === "dust"
+						? formatPriceForOrder(
+								getExecutedPrice("market", current.side, priceReference, marketSlippageBpsRef.current, priceReference),
+							)
+						: String(touch);
+				const order = {
+					a: assetId,
+					b: current.side === "buy",
+					p: String(price),
+					s: remaining.size,
+					r: true,
+					t: { limit: { tif: dustMarketAttempt ? ("FrontendMarket" as const) : trackedTif } },
+					c: cloid,
+				};
+				pendingCloid = cloid;
+				const initialPlacement = neverPlaced;
+				neverPlaced = false;
+				submitted = true;
+				let oid: number | undefined;
+				let resting = false;
+				if (PAPER_TRADE) {
+					const result = await submitPlanRef.current(
+						{ orders: [order], grouping: "na" },
+						{ coin: current.coin, dex: current.dex },
+					);
+					if (!result.ok) {
+						definiteRejection = true;
+						throw new Error(result.error);
+					}
+					oid = result.oid;
+					resting = result.outcome === "resting";
+				} else {
+					const result = await placeOrder({ orders: [order], grouping: "na" });
+					const statuses = result.response?.data?.statuses;
+					definiteRejection = !!statuses?.some((status) => typeof status === "object" && "error" in status);
+					throwIfAnyResponseError(statuses);
+					const primary = statuses?.[0];
+					if (!primary) throw new Error("No response from exchange");
+					if (typeof primary === "object") {
+						resting = "resting" in primary;
+						oid = "resting" in primary ? primary.resting.oid : "filled" in primary ? primary.filled.oid : undefined;
+					}
+				}
+				if (dustMarketAttempt) nextDustCloseAttemptAt = Date.now() + 5_000;
+				if (initialPlacement && (oid !== undefined || PAPER_TRADE) && isCurrent()) {
+					addOrder({
+						source: "chase",
+						market: current.coin,
+						side: current.side,
+						size: order.s,
+						price: order.p,
+						orderType: dustMarketAttempt ? "market" : "limit",
+						status: "success",
+						outcome: resting ? "resting" : "filled",
+						completedAt: Date.now(),
+					});
+				}
+				if (oid !== undefined || PAPER_TRADE) pendingCloid = undefined;
+				if (oid !== undefined) {
+					if (resting) {
+						remember(
+							{
+								coin: current.coin,
+								side: order.b ? "B" : "A",
+								oid,
+								limitPx: order.p,
+								sz: order.s,
+								origSz: order.s,
+								timestamp: Date.now(),
+								reduceOnly: true,
+								isTrigger: false,
+								triggerPx: "0",
+								triggerCondition: "",
+								children: [],
+								isPositionTpsl: false,
+								orderType: "Limit",
+								tif: trackedTif,
+								cloid,
+							},
+							true,
+						);
+					} else {
+						trackedOid = oid;
+						endedOids.add(oid);
+						acknowledgedOrder = undefined;
+					}
+				}
+			} catch (error) {
+				if (!submitted) return; // Unavailable reads pause recovery; they never justify a new write.
+				const message = error instanceof Error ? error.message : "Chase close recovery failed";
+				if (dustMarketAttempt) nextDustCloseAttemptAt = Date.now() + 5_000;
+				if (definiteRejection || error instanceof ApiRequestError || isPostOnlyRaceError(message)) {
+					pendingCloid = undefined;
+					if (trackedOid === undefined) neverPlaced = true;
+				}
+				if (!isPostOnlyRaceError(message)) logFailure(message);
+			} finally {
+				if (token && lockedOid !== undefined) orderOperationLock.release(scope, lockedOid, token);
+			}
 		}
 
 		const tick = () => {
 			const current = entryRef.current;
-			if (!current) return;
+			if (!current || !isCurrent() || pending) return;
 			// Captured before the close branch narrows it, so the timeout guard below can
 			// still read the mode as a plain value.
 			const chaseMode: ChaseEntry["mode"] = current.mode;
@@ -144,22 +488,28 @@ export function useChaseOrderEngine(): void {
 			// partially filled its remaining size no longer matches exactly — match on
 			// coin/side/reduce-only instead, or the chase would re-post on top of its own
 			// resting order.
+			const rows = ordersRef.current.filter((order) => !endedOids.has(order.oid));
+			const snapshotOrder =
+				neverPlaced || (pendingCloid && trackedOid === undefined)
+					? undefined
+					: trackedOid === undefined
+						? findActiveChaseOrder(rows, current)
+						: rows.find((order) => order.oid === trackedOid);
 			const order =
-				current.mode === "close"
-					? (findChaseOrder(ordersRef.current, current) ?? findRestingCloseOrder(ordersRef.current, current))
-					: findChaseOrder(ordersRef.current, current);
+				snapshotOrder ?? (Date.now() - acknowledgedAt < CHASE_TRACK_GRACE_MS ? acknowledgedOrder : undefined);
+			if (snapshotOrder) remember(snapshotOrder);
 			if (!order) {
 				// A close chase's job is to get the position flat. If its order is not on
 				// the book, the only honest options are "flat" or "re-post" — retiring as
 				// completed/cancelled here is what stopped the phone chase ~40s in.
 				if (current.mode === "close") {
 					// A close chase keeps riding while its order rests, and only finishes on
-					// a KNOWN position. An order missing from the snapshot for a moment (fill in
-					// flight, re-price, snapshot race) must not be read as "gone" — that is what
-					// stopped the phone chase with the position still open. (We deliberately do
-					// NOT auto re-post here: a re-post that fires on a snapshot race stacks a
-					// duplicate live order, which is worse than a missing convenience.)
-					if (lastOrderRef.current === null && shouldWaitForOrderSnapshot(current.startedAt, Date.now())) {
+					// a KNOWN position. Snapshot absence starts reconciliation, not a blind repost.
+					if (
+						!current.placementPending &&
+						lastOrderRef.current === null &&
+						shouldWaitForOrderSnapshot(current.startedAt, Date.now())
+					) {
 						return;
 					}
 					const action = nextCloseChaseAction({
@@ -167,7 +517,16 @@ export function useChaseOrderEngine(): void {
 						markPx: markRef.current ?? Number.NaN,
 					});
 					if (action === "wait") return;
-					if (action === "replace") return; // hold the entry; the order is in flight
+					if (action === "replace" || action === "dust") {
+						pending = recoverClose(current).finally(() => {
+							pending = undefined;
+						});
+						return;
+					}
+					const remaining = remainingToClose(current);
+					if (remaining)
+						finishClose(current, remaining, false, lastOrderRef.current?.price ?? String(markRef.current ?? 0));
+					return;
 				}
 				const cached = lastOrderRef.current;
 				if (cached === null) {
@@ -189,6 +548,7 @@ export function useChaseOrderEngine(): void {
 						});
 					}
 					addOrder({
+						source: "chase",
 						market: current.coin,
 						side: current.side,
 						size: current.sizeText,
@@ -237,9 +597,8 @@ export function useChaseOrderEngine(): void {
 			lastOrderRef.current = { oid: order.oid, price: order.limitPx };
 			const now = Date.now();
 			if (current.mode === "close") {
-				// Close chases run until the position is flat — or until the remainder
-				// can't fill an order anymore (sub-minimum notional or below the market's
-				// size step): stop with an explicit explanation instead of stranding dust.
+				// Close chases run until the position is flat. A representable sub-$10
+				// remainder is canceled and closed with a reduce-only market order.
 				// A missing position row while the snapshot is still in flight is NOT flat:
 				// treating it as flat cancelled a live close and retired it as completed.
 				const remaining = remainingToClose(current);
@@ -248,40 +607,19 @@ export function useChaseOrderEngine(): void {
 					markPx: markRef.current ?? Number.NaN,
 				});
 				if (action === "wait") return;
-				if (action === "replace") return;
-				// Action is "completed" (flat) or "dust" (a remainder no order can fill).
-				const szi = remaining?.szi ?? 0;
-				const mark = markRef.current ?? Number(order.limitPx);
-				const closeable = remaining?.size ?? "0";
-				const dust = action === "dust";
-				const orphan = findChaseOrder(ordersRef.current, current);
-				if (orphan) void cancelOpenOrders([orphan]);
-				useChaseOrderStore.getState().actions.pushHistory({
-					coin: current.coin,
-					side: current.side,
-					size: current.sizeText,
-					reduceOnly: current.reduceOnly,
-					startedAt: current.startedAt,
-					endedAt: now,
-					outcome: dust ? "error" : "completed",
-					price: order.limitPx,
-				});
-				lastOrderRef.current = null;
-				retiredRef.current = true;
-				if (dust) {
-					addOrder({
-						market: current.coin,
-						side: current.side,
-						size: closeable,
-						price: order.limitPx,
-						orderType: "limit",
-						status: "failed",
-						error: `$${(Math.abs(szi) * mark).toFixed(2)} of ${current.coin} remains — below Hyperliquid's $10 minimum order size, so no order can close it`,
-						completedAt: Date.now(),
-					});
+				if (action === "completed") {
+					if (remaining) finishClose(current, remaining, false, order.limitPx);
+					return;
 				}
-				useChaseOrderStore.getState().actions.clear();
-				return;
+				// A maker order can be partially filled below the minimum notional for a
+				// replacement. Cancel the resting tail, verify that it is gone, then use
+				// the market-close path instead of leaving a stale order behind.
+				if (action === "dust") {
+					pending = recoverClose(current, order).finally(() => {
+						pending = undefined;
+					});
+					return;
+				}
 			}
 			// Entry chases time out; close chases keep riding the touch (no cancel).
 			if (chaseMode !== "close" && shouldCancelChase(current.startedAt, now, timeoutMs)) {
@@ -302,7 +640,8 @@ export function useChaseOrderEngine(): void {
 				useChaseOrderStore.getState().actions.clear();
 				return;
 			}
-			if (lastSentRef.current !== 0 && now - lastSentRef.current < CHASE_MODIFY_INTERVAL_MS) return;
+			// The interval sets the cadence. A second wall-clock throttle can skip a
+			// slightly early callback and turn a 750 ms chase into a 1,500 ms chase.
 
 			// Preserve the placement's tif (post-only chases stay post-only — maker
 			// fees); anything unexpected falls back to GTC so a re-price can never
@@ -327,12 +666,13 @@ export function useChaseOrderEngine(): void {
 			} else {
 				const mark = markRef.current;
 				if (mark !== undefined) {
-					target = formatPriceForOrder(chaseBehindMarkPrice(current.side, mark, markets.getSzDecimals(current.coin)));
+					target = formatPriceForOrder(
+						chaseBehindMarkPrice(current.side, mark, marketsRef.current.getSzDecimals(current.coin)),
+					);
 				}
 			}
 			if (target === null) return;
 			if (target === order.limitPx) {
-				lastSentRef.current = now;
 				return;
 			}
 
@@ -340,15 +680,17 @@ export function useChaseOrderEngine(): void {
 				// Preview: the simulated book IS the book — re-price locally, never
 				// touch the exchange (there is no agent wallet to sign with).
 				paperActions.repriceOrder(order.oid, Number(target));
-				lastSentRef.current = now;
 				return;
 			}
-			const assetId = markets.getAssetId(current.coin);
+			const assetId = marketsRef.current.getAssetId(current.coin);
 			if (typeof assetId !== "number") {
 				useChaseOrderStore.getState().actions.clear();
 				return;
 			}
-			batchModify({
+			const scope = orderEvidenceScope(getInfoClient(), address ?? "paper");
+			const token = orderOperationLock.acquire(scope, order.oid);
+			if (!token) return;
+			pending = batchModify({
 				modifies: [
 					{
 						oid: order.oid,
@@ -365,7 +707,20 @@ export function useChaseOrderEngine(): void {
 				],
 			})
 				.then((result) => {
-					throwIfResponseError(result.response?.data?.statuses);
+					const statuses = result.response?.data?.statuses;
+					throwIfAnyResponseError(statuses);
+					const primary = statuses?.[0];
+					if (!primary) throw new Error("No response from exchange");
+					if (typeof primary === "object" && "resting" in primary) {
+						endedOids.add(order.oid);
+						endedOids.delete(primary.resting.oid);
+						remember({ ...order, oid: primary.resting.oid, limitPx: target, origSz: order.sz }, true);
+					} else if (typeof primary === "object" && "filled" in primary) {
+						trackedOid = primary.filled.oid;
+						endedOids.add(order.oid);
+						endedOids.add(trackedOid);
+						acknowledgedOrder = undefined;
+					}
 				})
 				.catch((error: unknown) => {
 					const message = error instanceof Error ? error.message : "Chase reprice failed";
@@ -374,40 +729,64 @@ export function useChaseOrderEngine(): void {
 						// the exchange. Re-price next tick with a fresh book — not a failure.
 						return;
 					}
-					// A rejected re-price must not kill the chase: log the first failure as
-					// an order-queue row, then keep ticking — the next tick re-reads the
-					// book (if the order filled mid-send, findChaseOrder retires it
-					// truthfully as filled/completed) and the timeout still cancels any
-					// orphan, so a persistent failure can never outlive the30s promise.
-					if (!modifyErrorLoggedRef.current) {
-						modifyErrorLoggedRef.current = true;
-						addOrder({
-							market: current.coin,
-							side: current.side,
-							size: order.sz,
-							price: order.limitPx,
-							orderType: "limit",
-							status: "failed",
-							error: message,
-							completedAt: Date.now(),
-						});
+					if (isChaseOrderGoneError(message)) {
+						endedOids.add(order.oid);
+						acknowledgedOrder = undefined;
+						return;
 					}
+					logFailure(message, order.sz, order.limitPx);
+				})
+				.finally(() => {
+					orderOperationLock.release(scope, order.oid, token);
+					pending = undefined;
 				});
-			lastSentRef.current = now;
 		};
 
 		tick(); // first re-price fires immediately — shrinks the pre-book window
 		const interval = setInterval(tick, CHASE_MODIFY_INTERVAL_MS);
 		return () => {
+			disposed = true;
 			clearInterval(interval);
 			// Whatever stops this entry managing its order (replaced by a newer chase,
 			// timeout, fill, error, unmount) must never leave an unmanaged order
 			// resting: cancel it if it is still on the book — a no-op once filled.
 			const stale = entry;
 			if (!stale) return;
-			const orphan = findChaseOrder(ordersRef.current, stale);
-			if (!orphan) return;
-			cancelOpenOrders([orphan]);
+			const cancelManaged = async () => {
+				if (!PAPER_TRADE && sessionRef.current.address !== address) return;
+				if (pendingCloid && address) {
+					try {
+						const status = await getInfoClient().orderStatus(
+							{ user: address, oid: pendingCloid },
+							AbortSignal.timeout(1500),
+						);
+						if (status.status === "order" && status.order.status === "open") remember(status.order.order, true);
+					} catch {
+						/* The original transport failure remains visible; never repost here. */
+					}
+				}
+				if (!knownOrder && trackedOid !== undefined && address && !PAPER_TRADE) {
+					try {
+						const status = await getInfoClient().orderStatus(
+							{ user: address, oid: trackedOid },
+							AbortSignal.timeout(1500),
+						);
+						if (status.status === "order" && status.order.status === "open") remember(status.order.order, true);
+					} catch {
+						/* Acknowledged identity is retained; absence is never cancellation proof. */
+					}
+				}
+				const orphan =
+					acknowledgedOrder ??
+					(trackedOid === undefined && !stale.placementPending
+						? findActiveChaseOrder(ordersRef.current, stale)
+						: ordersRef.current.find((order) => order.oid === trackedOid)) ??
+					knownOrder;
+				if (orphan && !endedOids.has(orphan.oid))
+					void cancelOpenOrdersRef.current([orphan], { source: "chase", suppressExpectedMissing: true });
+			};
+			if (pending) void pending.then(cancelManaged);
+			else cancelManaged();
 			if (!retiredRef.current) {
 				// Stopped managing without its own outcome (superseded / navigated away).
 				const cached = lastOrderRef.current;
@@ -419,9 +798,9 @@ export function useChaseOrderEngine(): void {
 					startedAt: stale.startedAt,
 					endedAt: Date.now(),
 					outcome: "cancelled",
-					price: cached?.price ?? orphan.limitPx,
+					price: cached?.price,
 				});
 			}
 		};
-	}, [entry, cancelOpenOrders, markets, batchModify, addOrder, paperActions]);
+	}, [entry, batchModify, placeOrder, addOrder, paperActions, address, isActive]);
 }

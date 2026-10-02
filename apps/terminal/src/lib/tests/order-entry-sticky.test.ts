@@ -3,6 +3,23 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { STORAGE_KEYS } from "@/config/app";
 import { useOrderEntryStore } from "@/stores/use-order-entry-store";
 
+describe("entry time-in-force after submission", () => {
+	it.each(["Gtc", "Ioc", "Alo"] as const)("keeps %s while clearing transient inputs", (tif) => {
+		const { actions } = useOrderEntryStore.getState();
+		actions.setTif(tif);
+		actions.setLimitPrice("83000");
+		actions.setTpPrice("85000");
+		actions.resetForm();
+		expect(useOrderEntryStore.getState()).toMatchObject({ tif, limitPrice: "", tpPrice: "" });
+	});
+	it("retains the deliberate IOC to GTC rule when switching to scale", () => {
+		const { actions } = useOrderEntryStore.getState();
+		actions.setTif("Ioc");
+		actions.setOrderType("scale");
+		expect(useOrderEntryStore.getState().tif).toBe("Gtc");
+	});
+});
+
 /**
  * Reduce Only is a sticky preference: the user sets it and it stays until they
  * change it — across order submission (resetForm), across order-type switches

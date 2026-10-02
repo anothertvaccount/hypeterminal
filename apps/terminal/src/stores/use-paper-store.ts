@@ -3,6 +3,7 @@ import { z } from "zod";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/config/app";
+import type { ChartOrderMode } from "@/domain/trade/order/time-in-force";
 import { playActionSound } from "@/lib/fill-sound";
 import {
 	applyPaperFill,
@@ -18,6 +19,7 @@ import {
 import { createValidatedStorage } from "@/lib/storage/validated-storage";
 import type { OpenOrder } from "@/lib/trade/open-orders";
 import { emitFillNotifications, type FillNotificationInput } from "@/stores/use-fill-notifications-store";
+import type { TpSlOrigin } from "@/stores/use-tpsl-origin-store";
 
 /** Keeps the transient oid→outcome cache bounded (oldest keys dropped). */
 function pruneOutcomes(map: Record<number, "filled" | "cancelled">): void {
@@ -63,6 +65,9 @@ interface PaperTradingState {
 		applyPlan: (fills: PaperFill[], resting: PaperOpenOrder[]) => void;
 		/** Chart drag: moves a resting limit to a new price. */
 		repriceOrder: (oid: number, limitPx: number) => void;
+		/** Flip resting orders between post-only and GTC, same price and size. */
+		setRestingTif: (oids: readonly number[], tif: "Gtc" | "Alo") => void;
+		convertTpSl: (oid: number, mode: ChartOrderMode, price: number, origin: TpSlOrigin) => OpenOrder;
 		cancelOrders: (oids: readonly number[]) => void;
 		/**
 		 * Checks live marks against the resting book, moves crossed orders off it,
@@ -121,6 +126,41 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 							return { ...order, limitPx };
 						}),
 					}));
+				},
+				setRestingTif: (oids, tif) => {
+					if (oids.length === 0) return;
+					const drop = new Set(oids);
+					set((state) => ({
+						openOrders: state.openOrders.map((order) =>
+							drop.has(order.oid) && !order.isTrigger ? { ...order, tif } : order,
+						),
+					}));
+				},
+				convertTpSl: (oid, mode, price, origin) => {
+					const state = get();
+					const source = state.openOrders.find((row) => row.oid === oid);
+					if (!source || !source.reduceOnly || mode === "Ioc") throw new Error("TP/SL is no longer open");
+					let size = source.size;
+					if (source.isTrigger && origin.fullPosition) {
+						const position = state.positions.find((row) => row.coin === source.coin);
+						if (!position || position.szi > 0 === source.isBuy) throw new Error("No position for this TP/SL");
+						size = Math.abs(position.szi);
+					}
+					if (!(size > 0)) throw new Error("Could not resolve TP/SL size");
+					const trigger = mode === "TriggerMarket";
+					const row: PaperOpenOrder = {
+						...source,
+						size: trigger && origin.fullPosition ? 0 : size,
+						limitPx: price,
+						isTrigger: trigger,
+						triggerPx: trigger ? price : undefined,
+						tpsl: trigger ? origin.tpsl : undefined,
+						isMarketTrigger: trigger,
+						tif: trigger ? "Gtc" : mode,
+						isPositionTpsl: trigger && origin.positionTpsl,
+					};
+					set({ openOrders: state.openOrders.map((order) => (order.oid === oid ? row : order)) });
+					return toOpenOrder(row);
 				},
 				cancelOrders: (oids) => {
 					if (oids.length === 0) return;

@@ -98,10 +98,11 @@ export function buildOrderSegments(order: ChartOrder, ctx: ChartLabelContext): L
 		const own = realizedIfHit(order, ctx.position);
 		numbers = ` [${formatSignedUsd(own)} / ${formatSignedUsd(cumulative ?? 0)}]`;
 	}
+	const label = `${orderTypeWord(order)}${numbers}${orderFlagsText(order)}`.trim();
 	return {
 		isBuy: order.side === "B",
 		segments: [
-			{ text: `${orderTypeWord(order)}${numbers}${orderFlagsText(order)}`, tone },
+			...(label ? [{ text: label, tone }] : []),
 			{ text: formatUsd(order.size * order.price), tone },
 			{ text: "\u2715", tone, key: "cancel" },
 		],

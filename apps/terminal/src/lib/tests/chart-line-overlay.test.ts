@@ -28,6 +28,40 @@ describe("line overlays", () => {
 		registerOverlay.mockClear();
 	});
 
+	it("keeps a long phone order's cancel cell clear of the axis price-picker", async () => {
+		const { registerOrderLineOverlay } = await import("@/lib/chart/order-line-overlay");
+		const { CROSS_HALF, getCrossLeft } = await import("@/lib/chart/price-axis");
+		registerOrderLineOverlay();
+		const overlayConfig = registerOverlay.mock.calls[0]?.[0];
+		const extendData = {
+			getSegments: () => ({
+				isBuy: true,
+				segments: [
+					{ text: "Post Only", tone: "buy", key: "tif" },
+					{ text: "Limit [+12345.67 USD / +12345.67 USD] Reduce Only", tone: "buy" },
+					{ text: "12345.67 USD", tone: "buy" },
+					{ text: "✕", tone: "buy", key: "cancel" },
+				],
+			}),
+			boxes: [] as Array<{ key: string; x1: number }>,
+		};
+		const figures = overlayConfig.createPointFigures({
+			overlay: { extendData, points: [{ value: 84000 }] },
+			coordinates: [{ x: 0, y: 42 }],
+			bounding: { width: 300 },
+		});
+		const crossLeft =
+			getCrossLeft({ left: 300, right: 360, top: 0, bottom: 500 }, { left: 0, top: 0, width: 360, height: 500 }) -
+			CROSS_HALF;
+		expect(extendData.boxes.find((box) => box.key === "cancel")?.x1).toBeLessThan(crossLeft);
+		const texts = figures
+			.filter((figure: { type: string }) => figure.type === "text")
+			.map((figure: { attrs: { text: string } }) => figure.attrs.text);
+		expect(texts).toContain("Post Only");
+		expect(texts).toContain("✕");
+		expect(texts.some((text: string) => text.endsWith("…"))).toBe(true);
+	});
+
 	it("registers the liquidation overlay once, labels the line and prices the axis", async () => {
 		const { LIQUIDATION_LINE_NAME, registerLiquidationLineOverlay } = await import(
 			"@/lib/chart/liquidation-line-overlay"
@@ -177,11 +211,20 @@ describe("line overlays", () => {
 
 		// Drag end reports the final point value to the extendData callback.
 		const onDragEnd = vi.fn();
-		const handled = overlayConfig.onPressedMoveEnd({
-			overlay: { points: [{ value: 123.45 }], extendData: { onDragEnd } },
-		});
+		const event = { x: 20, y: 40, overlay: { points: [{ value: 123.45 }], extendData: { onDragEnd } } };
+		overlayConfig.onPressedMoveStart(event);
+		overlayConfig.onPressedMoving({ ...event, y: 60 });
+		const handled = overlayConfig.onPressedMoveEnd({ ...event, y: 60 });
 		expect(handled).toBe(true);
 		expect(onDragEnd).toHaveBeenCalledWith(123.45);
+
+		// A cell tap is NOT a price drag: it must not start a Moving preview or
+		// rebuild the overlay before the subsequent TIF/cancel click is dispatched.
+		onDragEnd.mockClear();
+		overlayConfig.onPressedMoveStart(event);
+		overlayConfig.onPressedMoving({ ...event, y: 41 });
+		overlayConfig.onPressedMoveEnd({ ...event, y: 41 });
+		expect(onDragEnd).not.toHaveBeenCalled();
 
 		// Invalid values (missing / non-positive) are ignored.
 		const ignored = vi.fn();

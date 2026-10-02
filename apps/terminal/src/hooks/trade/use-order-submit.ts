@@ -162,6 +162,7 @@ export function useOrderSubmit(): UseOrderSubmitResult {
 		const hasSl = tpSlEnabled && canUseTpSl && isPositive(slPriceNum);
 
 		const orderId = addOrder({
+			source: isChase ? "chase" : undefined,
 			market: baseToken,
 			side,
 			size: formattedSize,
@@ -277,7 +278,13 @@ export function useOrderSubmit(): UseOrderSubmitResult {
 					leverage: input.leverage,
 					marginMode: input.marginMode,
 				};
-				let plan = buildPlan();
+				const chaseCloid = isChase ? (`0x${crypto.randomUUID().replaceAll("-", "")}` as const) : undefined;
+				const chasePlan = () => {
+					const plan = buildPlan();
+					if (chaseCloid && plan.orders[0]) plan.orders[0] = { ...plan.orders[0], c: chaseCloid };
+					return plan;
+				};
+				let plan = chasePlan();
 				let result = await submitPlan(plan, meta);
 				// A post-only chase can lose the race between its book read and the
 				// exchange (~50ms): Hyperliquid rejects the crossing order benignly —
@@ -296,7 +303,7 @@ export function useOrderSubmit(): UseOrderSubmitResult {
 					price = fresh;
 					limitPriceInput = formatPriceForOrder(price);
 					updateOrder(orderId, { price: limitPriceInput });
-					plan = buildPlan();
+					plan = chasePlan();
 					result = await submitPlan(plan, meta);
 				}
 
@@ -306,6 +313,9 @@ export function useOrderSubmit(): UseOrderSubmitResult {
 					if (orderType === "chaseLimit" && result.outcome !== "filled") {
 						useChaseOrderStore.getState().actions.start({
 							coin: market.coin ?? baseToken,
+							oid: result.oid,
+							cloid: chaseCloid,
+							tif: tif === "Gtc" ? "Gtc" : "Alo",
 							dex: market.dex,
 							side,
 							sizeText: formattedSize,

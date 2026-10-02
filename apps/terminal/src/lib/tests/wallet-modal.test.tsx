@@ -36,6 +36,7 @@ vi.mock("@lingui/core/macro", () => ({
 }));
 
 vi.mock("@phosphor-icons/react", () => ({
+	GithubLogoIcon: Icon,
 	ArrowSquareOutIcon: Icon,
 	CaretDownIcon: Icon,
 	CopyIcon: Icon,

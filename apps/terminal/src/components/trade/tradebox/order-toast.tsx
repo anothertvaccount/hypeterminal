@@ -2,6 +2,7 @@ import { Button } from "@hypeterminal/ui";
 import { t } from "@lingui/core/macro";
 import { CheckIcon, LightningIcon, SpinnerGapIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ORDER_TOAST_DISMISS_MS, ORDER_TOAST_SUCCESS_DURATION_MS } from "@/config/time";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/cn";
@@ -182,13 +183,14 @@ export function OrderToast() {
 		return () => clearTimeout(timer);
 	}, [orders, dismissed]);
 
-	if (dismissed || orders.length === 0) return null;
+	if (dismissed || orders.length === 0 || typeof document === "undefined") return null;
 
 	const pendingCount = orders.filter((o) => o.status === "pending").length;
 	const successCount = orders.filter((o) => o.status === "success").length;
 	const failedCount = orders.filter((o) => o.status === "failed").length;
 
-	return (
+	// Escape the fixed sidebar's stacking context so the book cannot cover the queue.
+	return createPortal(
 		<div
 			className={cn(
 				// Phone: the panel is docked to the TOP, full width. It used to sit
@@ -244,6 +246,7 @@ export function OrderToast() {
 					</div>
 				))}
 			</div>
-		</div>
+		</div>,
+		document.body,
 	);
 }

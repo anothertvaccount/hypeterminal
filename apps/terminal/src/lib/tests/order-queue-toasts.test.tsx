@@ -4,7 +4,7 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useOrderQueueToasts } from "@/hooks/trade/use-order-queue-toasts";
-import { useOrderQueueActions } from "@/stores/use-order-queue-store";
+import { type OrderQueueItem, useOrderQueue, useOrderQueueActions } from "@/stores/use-order-queue-store";
 
 vi.mock("@lingui/core/macro", () => ({
 	t: (strings: TemplateStringsArray | string, ...values: unknown[]) => {
@@ -25,13 +25,18 @@ vi.mock("sonner", () => ({
 
 type QueueActions = ReturnType<typeof useOrderQueueActions>;
 let actions: QueueActions | null = null;
+let queue: OrderQueueItem[] = [];
 
 function Probe({ capture = false }: { capture?: boolean }) {
 	useOrderQueueToasts();
 	// The store is only exposed through hooks, so the actions come from a render. The
 	// hook is called unconditionally — conditionally calling it is a hook-order bug.
 	const queueActions = useOrderQueueActions();
-	if (capture) actions = queueActions;
+	const orders = useOrderQueue();
+	if (capture) {
+		actions = queueActions;
+		queue = orders;
+	}
 	return null;
 }
 
@@ -69,6 +74,36 @@ describe("useOrderQueueToasts", () => {
 		unmount();
 	});
 
+	it.each(["direct", "transition"])("excludes a %s Chase failure from the queue and toast", (kind) => {
+		mountProbe(true);
+		let id = "";
+		act(() => {
+			id =
+				actions?.addOrder({
+					source: "chase",
+					market: "xyz:SP500",
+					side: "sell",
+					size: "0.002",
+					status: kind === "direct" ? "failed" : "pending",
+					error: "Order 0: Order was never placed, already canceled, or filled. asset=110052",
+				}) ?? "";
+		});
+		if (kind === "transition") act(() => actions?.updateOrder(id, { status: "failed" }));
+		expect(queue.some((order) => order.id === id)).toBe(false);
+		expect(toastError).not.toHaveBeenCalled();
+	});
+
+	it("keeps pending and successful Chase confirmations in the queue", () => {
+		mountProbe(true);
+		let id = "";
+		act(() => {
+			id = actions?.addOrder({ source: "chase", market: "BTC", side: "buy", size: "1", status: "pending" }) ?? "";
+		});
+		expect(queue.find((order) => order.id === id)?.status).toBe("pending");
+		act(() => actions?.updateOrder(id, { status: "success", outcome: "resting" }));
+		expect(queue.find((order) => order.id === id)?.status).toBe("success");
+	});
+
 	it("stays quiet for rows that already failed before mount", () => {
 		// Seed a failure with the watcher NOT mounted, then mount it: a page reload
 		// must not replay every old failure as a fresh toast.
@@ -94,12 +129,16 @@ describe("useOrderQueueToasts", () => {
 			id = actions?.addOrder({ market: "BTC", side: "sell", size: "0.1", status: "pending" }) ?? "";
 		});
 		act(() => {
-			actions?.updateOrder(id, { status: "failed", error: "Post-only chase needs a fresh book snapshot" });
+			actions?.updateOrder(id, {
+				status: "failed",
+				error: "Order 0: Order was never placed, already canceled, or filled. asset=110052",
+			});
 		});
+		expect(queue.find((order) => order.id === id)?.status).toBe("failed");
 		expect(toastError).toHaveBeenCalledTimes(1);
 		const [title, options] = toastError.mock.calls[0] as [string, { description?: string }];
 		expect(title).toContain("BTC");
-		expect(options?.description).toBe("Post-only chase needs a fresh book snapshot");
+		expect(options?.description).toBe("Order 0: Order was never placed, already canceled, or filled. asset=110052");
 	});
 
 	it("announces a failure only once, even if the row is updated again", () => {

@@ -187,11 +187,17 @@ export function useTradeHotkeys(): void {
 				if (!position) return;
 				const szi = Number(position.szi);
 				if (!Number.isFinite(szi) || szi === 0) return;
-				useChaseOrderStore.getState().actions.start({
+				const chase = useChaseOrderStore.getState();
+				if (chase.entry?.mode === "close" && chase.entry.coin === position.coin) return;
+				chase.actions.start({
 					coin: position.coin,
+					dex: position.coin.includes(":") ? position.coin.split(":")[0] : "",
 					side: szi > 0 ? "sell" : "buy",
 					sizeText: formatSizeForOrder(Math.abs(szi), markets.getSzDecimals(position.coin)),
 					reduceOnly: true,
+					tif: "Alo",
+					mode: "close",
+					placementPending: true,
 					startedAt: Date.now(),
 				});
 			},
@@ -245,11 +251,6 @@ export function useTradeHotkeys(): void {
 				const form = document.querySelector<HTMLFormElement>("form[data-order-form]");
 				form?.querySelector("input")?.focus();
 			},
-			toggleTrackPrice: () => {},
-			trackFarther: () => {},
-			trackCloser: () => {},
-			scaledPreview: () => {},
-			modifyScaleOrder: () => {},
 		};
 
 		return table;

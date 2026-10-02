@@ -134,6 +134,7 @@ export function MobileTradeView({ className }: Props) {
 		setSizeMode: setStoreSizeMode,
 		setLimitPrice,
 		setTpSlEnabled,
+		setReduceOnly,
 		resetPrices,
 	} = useOrderEntryActions();
 	// Shared-store mirrors of the local fields (external writers: Chase Close
@@ -172,7 +173,7 @@ export function MobileTradeView({ className }: Props) {
 	const sliderEpochRef = useRef(0);
 	const [sizeMode, setSizeMode] = useState<SizeMode>(storeSizeMode);
 	const [limitPriceInput, setLimitPriceInput] = useState(storeLimit || "");
-	const [reduceOnly, setReduceOnly] = useState(storeReduceOnly);
+	const reduceOnly = storeReduceOnly;
 	const [isDraggingSlider, setIsDraggingSlider] = useState(false);
 	const [dragSliderValue, setDragSliderValue] = useState(0);
 	const [approvalError, setApprovalError] = useState<string | null>(null);
@@ -209,11 +210,6 @@ export function MobileTradeView({ className }: Props) {
 		prevStoreSizeMode.current = storeSizeMode;
 		setSizeMode(storeSizeMode);
 	}
-	const prevStoreReduceOnly = useRef(storeReduceOnly);
-	if (prevStoreReduceOnly.current !== storeReduceOnly) {
-		prevStoreReduceOnly.current = storeReduceOnly;
-		setReduceOnly(storeReduceOnly);
-	}
 	const [walletModalOpen, setWalletModalOpen] = useState(false);
 	const [showMarginDialog, setShowMarginDialog] = useState(false);
 	const { open: openSettingsDialog } = useSettingsDialogActions();
@@ -234,6 +230,7 @@ export function MobileTradeView({ className }: Props) {
 		availableBalanceToken,
 		spotBalance,
 		maxSize,
+		reduceOnlyPositionSzi,
 		sizeValue,
 		orderValue,
 		sideLabels,
@@ -335,6 +332,8 @@ export function MobileTradeView({ className }: Props) {
 			: perpInput(baseInput, {
 					orderType,
 					markPx,
+					reduceOnly,
+					reduceOnlyPositionSzi,
 					maxSize,
 					usesTriggerPrice: false,
 					triggerPriceNum: null,
@@ -697,16 +696,9 @@ export function MobileTradeView({ className }: Props) {
 										setIsDraggingSlider(true);
 										setDragSliderValue(val);
 									}}
-									onValueCommitted={(value, details) => {
+									onValueCommitted={(value) => {
 										const val = Array.isArray(value) ? value[0] : value;
 										setIsDraggingSlider(false);
-										// Base UI reports WHY the value moved. A bare tap on the rail is a
-										// `track-press`, and on a phone that is one stray finger away from the far
-										// end — 100% of buying power, the "it maxed out my size" report. The $
-										// chips and the percentage buttons are the touch controls, so a bare rail
-										// tap is ignored and the controlled value snaps back. Real drags
-										// (`drag`) and keyboard steps (`keyboard`) still apply.
-										if (details?.reason === "track-press") return;
 										// A commit that lands after the size was cleared, chipped or typed is stale —
 										// applying it is what made "$50 after CC" add to the previous size.
 										if (sliderEpochRef.current !== sizeEpochRef.current) return;

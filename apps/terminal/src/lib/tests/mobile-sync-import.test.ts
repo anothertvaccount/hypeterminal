@@ -1,5 +1,7 @@
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
+import { markMobileSyncLinkConsumed, wasMobileSyncLinkConsumed } from "@/lib/mobile-sync/draft-storage";
+import { MOBILE_SYNC_PAYLOAD_TTL_MS } from "@/lib/mobile-sync/sync-core";
 import { MobileSyncImportError, verifyImportedMobileAgent } from "../mobile-sync/import-verification";
 import { createMobileAgentSyncUrl, decryptMobileAgentSyncEnvelope, MobileSyncError } from "../mobile-sync/sync-core";
 
@@ -136,5 +138,48 @@ describe("mobile sync import verification", () => {
 				extraAgents: [{ address: sync.agentAddress, name: sync.agentName, validUntil: NOW_MS - 1 }],
 			}),
 		).toThrow(MobileSyncImportError);
+	});
+});
+
+/**
+ * Single-use links: a link that already imported a key on this device is spent.
+ * The TTL is deliberately short too — an offline handoff cannot burn a code
+ * server-side, so the window is the real defence.
+ */
+describe("mobile sync single-use", () => {
+	it("remembers a consumed link and refuses it afterwards", () => {
+		const store = new Map<string, string>();
+		const storage = {
+			getItem: (key: string) => store.get(key) ?? null,
+			setItem: (key: string, value: string) => void store.set(key, value),
+			removeItem: (key: string) => void store.delete(key),
+			clear: () => store.clear(),
+			key: () => "",
+			length: 0,
+		} as unknown as Storage;
+
+		expect(wasMobileSyncLinkConsumed("sync-abc", { storage })).toBe(false);
+		markMobileSyncLinkConsumed("sync-abc", { storage });
+		expect(wasMobileSyncLinkConsumed("sync-abc", { storage })).toBe(true);
+		// A different link is unaffected.
+		expect(wasMobileSyncLinkConsumed("sync-xyz", { storage })).toBe(false);
+	});
+
+	it("never lets a storage failure block an import", () => {
+		const broken = {
+			getItem: () => {
+				throw new Error("denied");
+			},
+			setItem: () => {
+				throw new Error("denied");
+			},
+			removeItem: () => {},
+		} as unknown as Storage;
+		expect(() => markMobileSyncLinkConsumed("sync-abc", { storage: broken })).not.toThrow();
+		expect(wasMobileSyncLinkConsumed("sync-abc", { storage: broken })).toBe(false);
+	});
+
+	it("keeps the code window short", () => {
+		expect(MOBILE_SYNC_PAYLOAD_TTL_MS).toBeLessThanOrEqual(5 * 60 * 1000);
 	});
 });

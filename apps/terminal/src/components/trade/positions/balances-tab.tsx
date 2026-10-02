@@ -1,10 +1,10 @@
 import { Button, Checkbox, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@hypeterminal/ui";
 import { t } from "@lingui/core/macro";
-import { ArrowsDownUpIcon, ArrowsLeftRightIcon, PaperPlaneTiltIcon } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { ArrowsDownUpIcon } from "@phosphor-icons/react";
+import { useMemo } from "react";
 import { useConnection } from "wagmi";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { DEFAULT_QUOTE_TOKEN, HL_ALL_DEXS } from "@/config/app";
+import { HL_ALL_DEXS } from "@/config/app";
 import { SMALL_BALANCE_THRESHOLD_USD } from "@/config/trade";
 import {
 	type BalanceRow,
@@ -35,10 +35,6 @@ import {
 	positionsPanelTableShellClass,
 	positionsPanelTabRootClass,
 } from "./positions-panel-table-styles";
-import { SendModal } from "./send-modal";
-import { TransferModal } from "./transfer-modal";
-
-type TransferDirection = "toSpot" | "toPerp";
 
 export function BalancesTab() {
 	const { isConnected } = useConnection();
@@ -46,22 +42,6 @@ export function BalancesTab() {
 	const hideSmallBalances = useHideSmallBalances();
 	const { setHideSmallBalances } = useGlobalSettingsActions();
 	const { open: openSwapModal } = useSwapModalActions();
-	const [transferState, setTransferState] = useState<{
-		open: boolean;
-		direction: TransferDirection;
-	}>({
-		open: false,
-		direction: "toSpot",
-	});
-	const [sendState, setSendState] = useState<{
-		open: boolean;
-		asset: string;
-		accountType: "perp" | "spot";
-	}>({
-		open: false,
-		asset: DEFAULT_QUOTE_TOKEN,
-		accountType: "spot",
-	});
 
 	const { perpSummary, spotBalances, spotAvailableAfterMaintenance, accountAbstraction, isLoading, hasError } =
 		useDefaultDexBalances();
@@ -105,29 +85,10 @@ export function BalancesTab() {
 
 	const totalValue = useMemo(() => getTotalUsdValue(balances), [balances]);
 
-	function handleTransferClick(row: BalanceRow) {
-		if (row.asset !== DEFAULT_QUOTE_TOKEN) return;
-		const direction: TransferDirection = row.type === "perp" ? "toSpot" : "toPerp";
-		setTransferState({
-			open: true,
-			direction,
-		});
-	}
-
-	function handleSendClick(row: BalanceRow) {
-		setSendState({
-			open: true,
-			asset: row.asset,
-			accountType: row.type,
-		});
-	}
-
 	function renderBalanceRow(row: BalanceRow, index: number) {
 		const token = getToken(row.asset);
 		const decimals = row.type === "perp" ? 2 : (token?.szDecimals ?? 2);
-		const canTransfer = row.asset === DEFAULT_QUOTE_TOKEN && parseFloat(row.available) > 0;
 		const canSwap = row.type === "spot" && parseFloat(row.available) > 0;
-		const transferLabel = row.type === "perp" ? t`To Spot` : t`To Perp`;
 		const pnlData = getPnl(row);
 		return (
 			<TableRow
@@ -159,16 +120,6 @@ export function BalancesTab() {
 				</TableCell>
 				<TableCell size="dense" className={cn(positionsPanelTableCellClass, "text-right")}>
 					<div className="flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap">
-						{canTransfer && (
-							<Button
-								variant="link"
-								onClick={() => handleTransferClick(row)}
-								className="shrink-0 text-xs text-brand hover:text-brand/80 hover:bg-transparent px-1.5 py-0.5 gap-1"
-							>
-								<ArrowsLeftRightIcon className="size-2.5" />
-								{transferLabel}
-							</Button>
-						)}
 						{canSwap && (
 							<Button
 								variant="link"
@@ -177,16 +128,6 @@ export function BalancesTab() {
 							>
 								<ArrowsDownUpIcon className="size-2.5" />
 								{t`Swap`}
-							</Button>
-						)}
-						{parseFloat(row.available) > 0 && (
-							<Button
-								variant="link"
-								onClick={() => handleSendClick(row)}
-								className="shrink-0 text-xs text-brand hover:text-brand/80 hover:bg-transparent px-1.5 py-0.5 gap-1"
-							>
-								<PaperPlaneTiltIcon className="size-2.5" />
-								{t`Send`}
 							</Button>
 						)}
 					</div>
@@ -303,19 +244,6 @@ export function BalancesTab() {
 					</ScrollArea>
 				)}
 			</div>
-
-			<TransferModal
-				open={transferState.open}
-				onOpenChange={(open) => setTransferState((prev) => ({ ...prev, open }))}
-				initialDirection={transferState.direction}
-			/>
-
-			<SendModal
-				open={sendState.open}
-				onOpenChange={(open) => setSendState((prev) => ({ ...prev, open }))}
-				initialAsset={sendState.asset}
-				initialAccountType={sendState.accountType}
-			/>
 		</div>
 	);
 }

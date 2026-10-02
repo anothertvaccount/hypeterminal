@@ -25,6 +25,7 @@ import { useMarketActions } from "@/stores/use-market-store";
 import { useOrderEntryActions } from "@/stores/use-order-entry-store";
 import { usePaperActions, usePaperOpenOrderRows } from "@/stores/use-paper-store";
 import { AssetBadge } from "../components/asset-badge";
+import { OrderTifStatus } from "../positions/order-tif-status";
 import { MetricCell } from "./metric-cell";
 
 interface Props {
@@ -234,7 +235,7 @@ function MobileOrderCard({ order, szDecimals, kind, isCancelling, onCancel, onSe
 				</div>
 			</div>
 
-			<div className="grid grid-cols-3 divide-x divide-stroke-weak">
+			<div className="grid grid-cols-2 divide-x divide-stroke-weak">
 				<MetricCell
 					label={t`Price`}
 					value={isMarketTriggerOrder(order) ? t`Market` : formatPrice(order.limitPx, { szDecimals })}
@@ -247,6 +248,7 @@ function MobileOrderCard({ order, szDecimals, kind, isCancelling, onCancel, onSe
 							: formatToken(order.origSz, { decimals: szDecimals, symbol: order.coin })
 					}
 				/>
+				<MetricCell label={t`Time in force`} value={<OrderTifStatus order={order} />} />
 				<MetricCell label={t`Trigger`} value={order.triggerCondition || FALLBACK_VALUE_PLACEHOLDER} />
 			</div>
 

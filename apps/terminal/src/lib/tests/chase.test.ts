@@ -6,7 +6,9 @@ import {
 	chaseBehindMarkPrice,
 	chaseBookTouch,
 	chasePlacementPrice,
+	findActiveChaseOrder,
 	findChaseOrder,
+	isChaseOrderGoneError,
 	isPostOnlyRaceError,
 	nextCloseChaseAction,
 	shouldCancelChase,
@@ -131,6 +133,41 @@ describe("isPostOnlyRaceError", () => {
 		expect(isPostOnlyRaceError("Insufficient margin to place order")).toBe(false);
 		expect(isPostOnlyRaceError(undefined)).toBe(false);
 		expect(isPostOnlyRaceError("")).toBe(false);
+	});
+});
+
+describe("isChaseOrderGoneError", () => {
+	it("silences only the expected modify race", () => {
+		expect(isChaseOrderGoneError("Order 0: Cannot modify canceled or filled order")).toBe(true);
+		expect(isChaseOrderGoneError("Cannot modify cancelled or filled order")).toBe(true);
+		expect(isChaseOrderGoneError("Insufficient margin")).toBe(false);
+		expect(isChaseOrderGoneError("Order not found")).toBe(false);
+		expect(isChaseOrderGoneError(undefined)).toBe(false);
+	});
+});
+
+describe("findActiveChaseOrder", () => {
+	it("tracks a smaller close remainder while excluding triggers and non-reduce orders", () => {
+		const entry = {
+			coin: "BTC",
+			side: "sell" as const,
+			sizeText: "1",
+			reduceOnly: true,
+			mode: "close" as const,
+			startedAt: 1,
+		};
+		const partial = { coin: "BTC", side: "A", origSz: "0.4", sz: "0.3", reduceOnly: true, isTrigger: false };
+		expect(findActiveChaseOrder([partial], entry)).toBe(partial);
+		expect(
+			findActiveChaseOrder(
+				[
+					{ ...partial, isTrigger: true },
+					{ ...partial, reduceOnly: false },
+				],
+				entry,
+			),
+		).toBeUndefined();
+		expect(findActiveChaseOrder([partial], { ...entry, mode: "entry" })).toBeUndefined();
 	});
 });
 

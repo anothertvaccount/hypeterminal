@@ -7,6 +7,7 @@ import {
 	CopyIcon,
 	DeviceMobileIcon,
 	FlaskIcon,
+	GithubLogoIcon,
 	LinkIcon,
 	QrCodeIcon,
 	SpinnerGapIcon,
@@ -19,6 +20,7 @@ import type { Address } from "viem";
 import { isAddress } from "viem";
 import { type Connector, useConnect, useConnectors, useReconnect } from "wagmi";
 import { mock } from "wagmi/connectors";
+import { GITHUB_URL } from "@/config/app";
 import { MOCK_WALLETS } from "@/config/wagmi";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/cn";
@@ -604,6 +606,8 @@ function WalletContent({ onClose, isMobile }: { onClose: () => void; isMobile: b
 	const [desktopWalletScannerError, setDesktopWalletScannerError] = useState<string | null>(null);
 	const lastScannerFeedbackRef = useRef<QrFeedbackThrottleState | null>(null);
 	const [showAll, setShowAll] = useState(false);
+	// Trust note disclosure: two key points inline, nuance on demand.
+	const [showTrustDetails, setShowTrustDetails] = useState(false);
 	const [showMock, setShowMock] = useState(false);
 	const [recentWallets] = useState(() => getRecentWallets());
 	const [customAddress, setCustomAddress] = useState("");
@@ -1059,6 +1063,74 @@ function WalletContent({ onClose, isMobile }: { onClose: () => void; isMobile: b
 					</a>
 				</div>
 			)}
+			{/* Summarize the connection; keep the full storage and permission disclosure expandable. */}
+			<div className="space-y-1.5 px-4 pb-3">
+				<p className="text-2xs leading-relaxed text-fg-muted">
+					<Trans>
+						HypeTerminal is a static trading interface with no app signup or trading backend. It saves settings and
+						approved trading keys in your browser. Those keys can place orders without a wallet prompt each time.
+					</Trans>{" "}
+					<button
+						type="button"
+						aria-expanded={showTrustDetails}
+						onClick={() => setShowTrustDetails((value) => !value)}
+						className="inline-flex items-center gap-0.5 rounded-xs text-2xs font-medium text-fg underline underline-offset-2 hover:text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stroke-focus"
+					>
+						<Trans>Details</Trans>
+						<CaretDownIcon
+							className={cn("size-3 transition-transform", showTrustDetails && "rotate-180")}
+							aria-hidden="true"
+						/>
+					</button>
+				</p>
+				{showTrustDetails && (
+					<div className="space-y-1.5 border-l-2 border-stroke-weak pl-2 text-2xs leading-relaxed text-fg-muted">
+						<p>
+							<Trans>
+								Connecting lets the app read your public wallet address and request your Hyperliquid account data.
+								Connecting alone does not place a trade. To enable trading, you approve a Hyperliquid trading agent in
+								your wallet. The approved agent then signs orders and cancellations without asking your wallet each
+								time. Disconnecting your wallet does not revoke that agent's approval on Hyperliquid.
+							</Trans>
+						</p>
+						<p>
+							<Trans>
+								Settings, recent wallet addresses, and generated trading-agent private keys are stored in this browser.
+								Phone Access encrypts the key for handoff using AES-GCM and a separate pairing code. The encrypted
+								payload is carried after # in the link, so it is not included in the HTTP request for the page. After
+								import, the decrypted trading key is stored unencrypted in the phone's browser storage.
+							</Trans>
+						</p>
+						<p>
+							<Trans>
+								Account queries and signed actions go to Hyperliquid. Depending on how you connect, wallet connector and
+								RPC services also receive connection data; WalletConnect's SDK telemetry is enabled when used. Hosting
+								and third-party services may retain request or connection logs. HypeTerminal has no app account database
+								or trading backend in this deployment.
+							</Trans>
+						</p>
+						<p>
+							<Trans>
+								The current interface has no outbound withdrawal, transfer or send controls. Hyperliquid agent keys
+								cannot withdraw your funds, but they can trade, and trading losses, fees, funding and liquidation can
+								reduce your balance.
+							</Trans>
+						</p>
+						<p>
+							<Trans>MIT licensed and open source.</Trans>{" "}
+							<a
+								href={GITHUB_URL}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stroke-focus"
+							>
+								<GithubLogoIcon className="size-3" aria-hidden="true" />
+								<Trans>Read the source</Trans>
+							</a>
+						</p>
+					</div>
+				)}
+			</div>
 		</div>
 	);
 }

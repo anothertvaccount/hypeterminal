@@ -2,8 +2,9 @@
  * Hotkey definitions — battle-tested trading hotkey defaults. Statuses are honest:
  *  - `available`: fully wired — bound by a default key, or bindable with no default
  *    binding (Settings → Hotkeys assigns one);
- *  - `unavailable`: hypeterminal has no equivalent feature (shown read-only).
- *    (no track-price offsets, no chart scale-order preview).
+ *  - `unavailable`: hypeterminal has no equivalent feature (shown read-only). Keys
+ *    for features this build does not ship are left out entirely rather than listed
+ *    as dead rows.
  */
 
 export type HotkeyGroup = "Chart clicks" | "Order entry" | "Cancellations" | "Order book" | "Form toggles";
@@ -250,46 +251,6 @@ const RAW_HOTKEYS = [
 		availability: "available",
 		note: "Desktop: focuses the order form. Mobile: opens the Trade tab.",
 	},
-	{
-		id: "toggleTrackPrice",
-		combo: "e",
-		label: "Toggle track price",
-		group: "Form toggles",
-		availability: "unavailable",
-		note: "Track-price offsets aren't part of this build.",
-	},
-	{
-		id: "trackFarther",
-		combo: "f",
-		label: "Move track price farther",
-		group: "Form toggles",
-		availability: "unavailable",
-		note: "Track-price offsets aren't part of this build.",
-	},
-	{
-		id: "trackCloser",
-		combo: "g",
-		label: "Move track price closer",
-		group: "Form toggles",
-		availability: "unavailable",
-		note: "Track-price offsets aren't part of this build.",
-	},
-	{
-		id: "scaledPreview",
-		combo: "t",
-		label: "Place scaled preview",
-		group: "Form toggles",
-		availability: "unavailable",
-		note: "Chart scale-order preview isn't part of this build (scale orders still work from the form).",
-	},
-	{
-		id: "modifyScaleOrder",
-		combo: "n",
-		label: "Modify single scaled order",
-		group: "Form toggles",
-		availability: "unavailable",
-		note: "Chart scale-order preview isn't part of this build.",
-	},
 ] as const satisfies readonly HotkeyDefinition[];
 
 export type HotkeyId = (typeof RAW_HOTKEYS)[number]["id"];
@@ -309,10 +270,6 @@ export const CHART_ACTION_IDS = [
 
 /** Open/close the shortcuts help overlay. */
 export const HELP_HOTKEY = "?";
-
-/** Chart-reserved keys: leave these for the chart (we never bind them). */
-export const RESERVED_CHART_KEYS_NOTE =
-	"Shift + B and Shift + S are reserved by the TradingView chart — never bound here.";
 
 export function getHotkey(id: HotkeyId): HotkeyDefinition {
 	const found = HOTKEYS.find((hotkey) => hotkey.id === id);

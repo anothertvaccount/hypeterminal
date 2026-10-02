@@ -20,11 +20,14 @@ import {
 import { buildPreviewSegments, computeFormDrafts, draftReferencePrice } from "@/domain/trade/order/chart-preview";
 import { buildOrderSegments } from "@/domain/trade/order/chart-risk";
 import { formatPriceForOrder, formatSizeForOrder } from "@/domain/trade/orders";
+import { useChartOrderMoves } from "@/hooks/trade/use-chart-order-moves";
 import { useOrderEntryData } from "@/hooks/trade/use-order-entry-data";
 import { useOrderLineActions } from "@/hooks/trade/use-order-line-actions";
 import { usePlaceTpSl } from "@/hooks/trade/use-place-tpsl";
 import { LABEL_BOX_HEIGHT } from "@/lib/chart/label-style";
+import { failedMoveSegments, pendingMoveSegments } from "@/lib/chart/order-move-label";
 import { noteChartOverlayInteraction } from "@/lib/chart/overlay-interaction";
+import { ORDER_LABEL_AXIS_GUTTER } from "@/lib/chart/price-axis";
 import { useSelectedMarketInfo, useSubscription, useTradingSession, useUserPositions } from "@/lib/hyperliquid";
 import type { OpenOrder } from "@/lib/trade/open-orders";
 import { canUseTpSl } from "@/lib/trade/order-types";
@@ -45,8 +48,10 @@ import {
 	useTpPrice,
 	useTpSlEnabled,
 } from "@/stores/use-order-entry-store";
+import { useOrderMoveStore } from "@/stores/use-order-move-store";
 import { usePaperOpenOrderRows } from "@/stores/use-paper-store";
 import { getShortBuilderSymbol } from "../use-kline-position-overlays";
+import { OrderTifControl } from "./order-tif-control";
 import { tvPriceToViewportY, tvViewportYToPrice } from "./tv-calibration";
 import { LabelStrip } from "./tv-label-strip";
 import type { TvCalibration } from "./use-tv-calibration";
@@ -61,6 +66,8 @@ interface Params {
 }
 
 interface TvLineRow {
+	/** The raw open-order row, for the type control. */
+	order?: OpenOrder;
 	id: string;
 	price: number;
 	segments: LabelSegment[];
@@ -133,10 +140,12 @@ export function TradingViewOverlayLayer({ hostRef, calibration, symbol, dex, shi
 		{ enabled: !PAPER_TRADE && isActive },
 	);
 	const { data: midsEvent } = useSubscription("allMids", { dex: HL_ALL_DEXS }, { enabled: true });
-	const allOrders = useMemo(
+	const rawOrders = useMemo(
 		() => (PAPER_TRADE ? paperRows : (openOrdersEvent?.orders ?? [])),
 		[paperRows, openOrdersEvent],
 	);
+	const allOrders = useChartOrderMoves(rawOrders);
+	const moves = useOrderMoveStore((state) => state.moves);
 	const symbolOrders = useMemo(() => allOrders.filter((order) => order.coin === symbol), [allOrders, symbol]);
 	const chartOrders = useMemo(() => symbolOrders.map(chartOrderFromOpenOrder), [symbolOrders]);
 	const position = getPosition(symbol, dex) ?? getPosition(getShortBuilderSymbol(symbol), dex);
@@ -263,20 +272,29 @@ export function TradingViewOverlayLayer({ hostRef, calibration, symbol, dex, shi
 			const resolution = buildOrderSegments(chartOrderFromOpenOrder(order), ctx);
 			// A cancel in flight: swap the ✕ for a spinner and dim the row so the
 			// press reads instantly, even though the exchange takes ~a second.
-			const cancelling = isCancelling(order.oid);
+			const move = Object.values(moves).find((move) => move.order.oid === order.oid);
+			const moving = move?.pending;
+			const failed = !!move?.error;
+			const cancelling = isCancelling(order.oid) || moving;
+			const segments = moving
+				? pendingMoveSegments(resolution.segments[0].tone, move.kind)
+				: failed
+					? failedMoveSegments(resolution.segments[0].tone)
+					: resolution.segments;
 			out.push({
 				id: `order-${order.oid}`,
 				price: rawPrice,
 				segments: cancelling
-					? resolution.segments.map((segment) => (segment.key === "cancel" ? { ...segment, text: "…" } : segment))
-					: resolution.segments,
+					? segments.map((segment) => (segment.key === "cancel" ? { ...segment, text: "…" } : segment))
+					: segments,
 				isBuy: resolution.isBuy,
 				alpha: cancelling ? 0.16 : 0.35,
-				draggable: !cancelling,
+				draggable: !cancelling && !failed,
 				kind: "order",
 				onDragEnd: (raw) => void repriceOrder(order, raw),
+				order: moving || failed ? undefined : order,
 				onBoxClick: (key) => {
-					if (key === "cancel" && !cancelling) void cancelOrder(order);
+					if (key === "cancel" && !cancelling && !failed) void cancelOrder(order);
 				},
 			});
 		});
@@ -338,6 +356,7 @@ export function TradingViewOverlayLayer({ hostRef, calibration, symbol, dex, shi
 		repriceOrder,
 		cancelOrder,
 		isCancelling,
+		moves,
 		symbol,
 		beginTpSlDrag,
 		sizeValue,
@@ -535,11 +554,11 @@ export function TradingViewOverlayLayer({ hostRef, calibration, symbol, dex, shi
 				const left = (m.plot.left - rect.left).toFixed(1);
 				// Half the plot on desktop (the label sits left of centre, like the
 				// default canvas). On a phone the plot is only ~330px, so anything
-				// short of the full width squeezes the cells into each other — use
-				// the whole canvas there.
+				// short of the full width squeezes the cells into each other. Reserve
+				// the axis cross and its gap so a cancel touch cannot hit the price picker.
 				const plotWidth = m.plot.right - m.plot.left;
 				const share = plotWidth < 420 ? 1 : 0.5;
-				const half = (plotWidth * share).toFixed(1);
+				const half = Math.min(plotWidth * share, Math.max(0, plotWidth - ORDER_LABEL_AXIS_GUTTER)).toFixed(1);
 				for (const box of stripBoxElsRef.current.values()) {
 					box.style.left = `${left}px`;
 					box.style.width = `${half}px`;
@@ -713,7 +732,13 @@ export function TradingViewOverlayLayer({ hostRef, calibration, symbol, dex, shi
 									endTpSlDrag();
 								}}
 							>
+								{/* The strip is the positioning context for the type control that sits
+								    just LEFT of the label, so it must live INSIDE the strip: as a
+								    sibling, `right-full` anchors to the full-width row and the control
+								    lands off-screen. `overflow-visible` lets it escape; the label's own
+								    width cap still lives inside LabelStrip. */}
 								<span className="relative inline-flex max-w-full overflow-hidden" data-tv-strip="">
+									{row.order && <OrderTifControl order={row.order} />}
 									<LabelStrip segments={row.segments} isBuy={row.isBuy} />
 									{isDragged && (
 										<span

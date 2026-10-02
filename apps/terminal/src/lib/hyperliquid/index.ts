@@ -86,6 +86,7 @@ export {
 	useHyperliquid,
 	useHyperliquidClients,
 	useHyperliquidOptional,
+	useHyperliquidStoreApi,
 	useInfo,
 	useSubscription,
 	useSubscriptionTransport,

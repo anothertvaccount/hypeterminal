@@ -8,7 +8,13 @@ import { privateKeyToAccount } from "viem/accounts";
 
 export const MOBILE_SYNC_FRAGMENT_KEY = "ht-mobile-sync";
 export const MOBILE_SYNC_ROUTE_PATH = "/mobile-agent-sync";
-export const MOBILE_SYNC_PAYLOAD_TTL_MS = 10 * 60 * 1000;
+/**
+ * How long a link + pairing code can be used. Deliberately short: the code alone
+ * unlocks trading, and a fully offline handoff cannot be made *provably*
+ * single-use (there is no server to burn the code on), so the practical defence is
+ * the smallest window that still lets a human scan a QR and type 16 characters.
+ */
+export const MOBILE_SYNC_PAYLOAD_TTL_MS = 3 * 60 * 1000;
 export const MOBILE_SYNC_CLOCK_SKEW_MS = 60 * 1000;
 export const MOBILE_SYNC_KDF_ITERATIONS = 310000;
 export { createMobileAgentName, MOBILE_AGENT_NAME_BASE, MOBILE_AGENT_VALIDITY_MS };

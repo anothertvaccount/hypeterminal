@@ -66,7 +66,9 @@ export function TradingViewChart({
 		if (!containerRef.current) return;
 		let disposed = false;
 		let handleAutoSave: (() => void) | null = null;
+		let autoSaveWidget: IChartingLibraryWidget | null = null;
 		chartReadyRef.current = false;
+		setChartReadyState(false);
 
 		/** Price scales in absolute mode — never percentages, never indexed-to-100. */
 		function forceAbsolutePriceScale(widget: IChartingLibraryWidget): void {
@@ -138,18 +140,17 @@ export function TradingViewChart({
 				});
 				widgetRef.current = widget;
 
-				// The library only NOTIFIES about changes (debounced by auto_save_delay) —
-				// this pushes the serialized chart through the save/load adapter into
-				// localStorage, which is what makes indicators survive a reload.
-				handleAutoSave = () => {
-					void saveWidgetState(widget);
-				};
-				widget.subscribe("onAutoSaveNeeded", handleAutoSave);
-
 				widget.onChartReady(() => {
 					if (disposed || widgetRef.current !== widget) return;
 					chartReadyRef.current = true;
 					setChartReadyState(true);
+					// Before-ready subscriptions queue against the iframe and can run after
+					// an early chart switch removes it. Register only on this ready widget.
+					handleAutoSave = () => {
+						if (!disposed && widgetRef.current === widget) void saveWidgetState(widget);
+					};
+					widget.subscribe("onAutoSaveNeeded", handleAutoSave);
+					autoSaveWidget = widget;
 					// Rehydrate the saved layout (indicators + drawings) from localStorage.
 					loadWidgetState(widget, symbol);
 					// Absolute prices, always. TradingView persists a "percentage" /
@@ -218,9 +219,9 @@ export function TradingViewChart({
 		return () => {
 			disposed = true;
 			clearTimeout(readyTimer);
-			if (handleAutoSave) {
+			if (handleAutoSave && autoSaveWidget) {
 				try {
-					widgetRef.current?.unsubscribe("onAutoSaveNeeded", handleAutoSave);
+					autoSaveWidget.unsubscribe("onAutoSaveNeeded", handleAutoSave);
 				} catch {
 					// Widget already gone.
 				}

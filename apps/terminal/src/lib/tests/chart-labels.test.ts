@@ -11,6 +11,7 @@ import {
 	orderFlagsText,
 	orderTypeWord,
 	realizedIfHit,
+	restingOrdersForTifSwitch,
 } from "@/domain/trade/order/chart-labels";
 import { buildOrderSegments, cumulativePnlAt } from "@/domain/trade/order/chart-risk";
 
@@ -139,31 +140,33 @@ describe("order label segments", () => {
 		const { segments, isBuy } = buildOrderSegments(REDUCE_SELL, ctx);
 		expect(isBuy).toBe(false);
 		expect(segments).toHaveLength(3);
-		expect(segments[0].text).toBe("Limit [+13.26 USD / +17.68 USD] [R, P]");
+		expect(segments[0].text).toBe("[+13.26 USD / +17.68 USD] [R]");
 		expect(segments[1].text).toBe("266.92 USD");
 		expect(segments[2]).toMatchObject({ text: "\u2715", key: "cancel" });
 	});
 
 	it("rebuilds the screenshot's buy-limit label exactly", () => {
 		const { segments } = buildOrderSegments(ADD_BUY, ctx);
-		expect(segments[0].text).toBe("Limit [+0.00 USD / -11.75 USD] [P]");
+		expect(segments[0].text).toBe("[+0.00 USD / -11.75 USD]");
 		expect(segments[1].text).toBe("734.55 USD");
 	});
 
 	it("omits the PnL numbers before the first mark tick", () => {
 		const { segments } = buildOrderSegments(REDUCE_SELL, { ...ctx, mark: undefined });
-		expect(segments[0].text).toBe("Limit [R, P]");
+		expect(segments[0].text).toBe("[R]");
+		const opening = buildOrderSegments(ADD_BUY, { ...ctx, mark: undefined });
+		expect(opening.segments.map((segment) => segment.text)).toEqual(["734.55 USD", "\u2715"]);
 	});
 
-	it("labels triggers TP/SL and derives flags from tif/reduceOnly", () => {
+	it("labels triggers TP/SL and keeps only the reduce-only flag", () => {
 		const tp: ChartOrder = { ...REDUCE_SELL, price: 120, isTrigger: true, tpsl: "tp", tif: "Gtc" };
 		expect(orderTypeWord(tp)).toBe("TP");
-		expect(orderFlagsText(tp)).toBe(" [R, GTC]");
+		expect(orderFlagsText(tp)).toBe(" [R]");
 		const sl: ChartOrder = { ...tp, tpsl: "sl" };
 		expect(orderTypeWord(sl)).toBe("SL");
 	});
 
-	it("spells out the time-in-force: GTC, IOC, and P for post-only", () => {
+	it("no longer spells out the time-in-force on the chart", () => {
 		const base: Omit<ChartOrder, "tif"> = {
 			side: "B",
 			price: 100,
@@ -172,11 +175,13 @@ describe("order label segments", () => {
 			isTrigger: false,
 			tpsl: null,
 		};
-		expect(orderFlagsText({ ...base, tif: "Gtc" })).toBe(" [GTC]");
-		expect(orderFlagsText({ ...base, tif: "Ioc" })).toBe(" [IOC]");
-		expect(orderFlagsText({ ...base, tif: "Alo" })).toBe(" [P]");
+		// The order form has an explicit type selector, so the per-line [GTC]/[IOC]/[P]
+		// badge was duplicated noise. Only reduce-only is still flagged.
+		expect(orderFlagsText({ ...base, tif: "Gtc" })).toBe("");
+		expect(orderFlagsText({ ...base, tif: "Ioc" })).toBe("");
+		expect(orderFlagsText({ ...base, tif: "Alo" })).toBe("");
 		expect(orderFlagsText({ ...base, tif: null })).toBe("");
-		expect(orderFlagsText({ ...base, tif: "Gtc", reduceOnly: true })).toBe(" [R, GTC]");
+		expect(orderFlagsText({ ...base, tif: "Gtc", reduceOnly: true })).toBe(" [R]");
 	});
 });
 
@@ -276,5 +281,34 @@ describe("buildTpSlExchangeOrder", () => {
 			r: true,
 			t: { trigger: { isMarket: true, triggerPx: "123.46", tpsl: "tp" } },
 		});
+	});
+});
+
+/**
+ * The order-type picker is a LIMIT-order control. TP/SL and other trigger orders
+ * carry their own time-in-force and must never be re-posted by it.
+ */
+describe("restingOrdersForTifSwitch", () => {
+	const limit = { coin: "BTC", oid: 1, tif: "Alo", isTrigger: false };
+
+	it("selects a plain resting order of this market that needs the new type", () => {
+		expect(restingOrdersForTifSwitch([limit], "BTC", "Gtc")).toEqual([limit]);
+	});
+
+	it("leaves TP/SL and other trigger orders alone", () => {
+		const tp = { coin: "BTC", oid: 2, tif: "Alo", isTrigger: true };
+		const stop = { coin: "BTC", oid: 3, tif: "Gtc", isTrigger: true };
+		expect(restingOrdersForTifSwitch([tp, stop], "BTC", "Gtc")).toEqual([]);
+	});
+
+	it("leaves other markets and orders already in the target type alone", () => {
+		const other = { coin: "ETH", oid: 4, tif: "Alo", isTrigger: false };
+		const already = { coin: "BTC", oid: 5, tif: "Gtc", isTrigger: false };
+		expect(restingOrdersForTifSwitch([other, already], "BTC", "Gtc")).toEqual([]);
+	});
+
+	it("matches a builder market by its short symbol", () => {
+		const builder = { coin: "xyz:PURR", oid: 6, tif: "Alo", isTrigger: false };
+		expect(restingOrdersForTifSwitch([builder], "PURR", "Gtc")).toEqual([builder]);
 	});
 });

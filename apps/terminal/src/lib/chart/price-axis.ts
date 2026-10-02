@@ -46,6 +46,9 @@ export const CROSS_PANE_GAP = 4;
 /** Hover zone reaches this far LEFT of the axis — enough to cover the cross itself. */
 export const CROSS_HOVER_EXTENSION = CROSS_HALF * 2 + CROSS_PANE_GAP;
 
+/** Keep label cancel hitboxes (including the DOM's 6px touch expansion) clear of the axis cross. */
+export const ORDER_LABEL_AXIS_GUTTER = CROSS_HOVER_EXTENSION + 12;
+
 /**
  * Horizontal CENTER of the cross, wrapper-relative: just inside the **pane**, right
  * next to the axis border — never on the price-label strip, so interacting with it

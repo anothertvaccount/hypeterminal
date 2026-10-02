@@ -13,6 +13,7 @@ import {
 	minOrderNotionalValidator,
 	type OrderInputContext,
 } from "../definitions/order-input";
+import { type ReduceOnlyChaseContext, reduceOnlyChaseValidator } from "../definitions/reduce-only";
 import {
 	enterPriceRangeValidator,
 	type ScaleContext,
@@ -31,7 +32,13 @@ import {
 import { type TwapContext, twapMinNotionalValidator, twapMinutesRangeValidator } from "../definitions/twap";
 import { runValidators, type ValidationError, type Validator } from "../types";
 
-export interface PerpOrderContext extends OrderInputContext, TpSlContext, TriggerContext, ScaleContext, TwapContext {
+export interface PerpOrderContext
+	extends OrderInputContext,
+		TpSlContext,
+		TriggerContext,
+		ScaleContext,
+		TwapContext,
+		ReduceOnlyChaseContext {
 	isConnected: boolean;
 	isWalletLoading: boolean;
 	isReadyToTrade: boolean;
@@ -57,6 +64,7 @@ const perpOrderValidators: Validator<PerpOrderContext>[] = [
 	marketNotReadyValidator,
 	signerNotReadyValidator,
 	noMarkPriceValidator,
+	reduceOnlyChaseValidator,
 	enterLimitPriceValidator,
 	enterTriggerPriceValidator,
 	enterSizeValidator,

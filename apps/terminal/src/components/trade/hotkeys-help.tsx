@@ -1,6 +1,6 @@
 import { XIcon } from "@phosphor-icons/react";
 import { useEffect } from "react";
-import { HELP_HOTKEY, HOTKEYS, type HotkeyGroup, RESERVED_CHART_KEYS_NOTE } from "@/config/hotkeys";
+import { HELP_HOTKEY, HOTKEYS, type HotkeyGroup } from "@/config/hotkeys";
 import { comboDisplay } from "@/lib/hotkeys/engine";
 import { isCustomBinding, resolveCombo } from "@/lib/hotkeys/resolve";
 import {
@@ -130,7 +130,7 @@ export function HotkeysHelp() {
 				})}
 
 				<p className="text-2xs text-fg-muted border-t border-stroke-weak/60 pt-3">
-					{RESERVED_CHART_KEYS_NOTE} Our own addition: <Kbd>{HELP_HOTKEY}</Kbd> opens/closes this panel.
+					Our own addition: <Kbd>{HELP_HOTKEY}</Kbd> opens/closes this panel.
 				</p>
 			</div>
 		</div>

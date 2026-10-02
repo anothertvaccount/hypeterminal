@@ -25,8 +25,12 @@ import { isStopOrder, isTakeProfitOrder, type OpenOrder } from "@/lib/trade/open
 export type LabelTone = "buy" | "sell" | "up" | "down" | "tp" | "sl" | "preview";
 
 export interface LabelSegment {
-	/** Interactive boxes only: "cancel" on order lines, "tp"/"sl" on the position line, "preview" on form drafts. */
-	key?: "cancel" | "tp" | "sl" | "preview";
+	/**
+	 * Interactive boxes only: "cancel" on order lines, "tp"/"sl" on the position line,
+	 * "preview" on form drafts, and "tif" — the order-type cell that re-posts a resting
+	 * order as post only / GTC / IOC at the same size and price.
+	 */
+	key?: "cancel" | "tp" | "sl" | "preview" | "tif";
 	text: string;
 	tone: LabelTone;
 	/** Solid-fill badge (the Long/Short chip) instead of an outlined box. */
@@ -110,27 +114,25 @@ export function formatUsd(value: number): string {
 	return `${Math.abs(value).toFixed(2)} USD`;
 }
 
-/** Order type word shown at the head of the label. */
+/** Trigger kind shown at the head of the label; limits use the separate TIF control. */
 export function orderTypeWord(order: ChartOrder): string {
 	if (order.isTrigger) {
 		if (order.tpsl === "tp") return "TP";
 		if (order.tpsl === "sl") return "SL";
 		return "Stop";
 	}
-	return "Limit";
+	return "";
 }
 
 /**
- * "[R, GTC]"-style flags: R = reduce-only, then the time-in-force — GTC and IOC
- * verbatim, post-only (Alo) as "P". Empty string when there is nothing to flag.
+ * "[R]"-style flags for a chart order line.
+ *
+ * Only reduce-only is flagged. The time-in-force used to be spelled out here too
+ * ("[P]", "[GTC]", "[IOC]"), but the order form now has an explicit type selector
+ * that re-posts resting orders, so the flag was duplicated noise on every line.
  */
 export function orderFlagsText(order: ChartOrder): string {
-	const flags: string[] = [];
-	if (order.reduceOnly) flags.push("R");
-	if (order.tif === "Gtc") flags.push("GTC");
-	else if (order.tif === "Ioc") flags.push("IOC");
-	else if (order.tif === "Alo") flags.push("P");
-	return flags.length > 0 ? ` [${flags.join(", ")}]` : "";
+	return order.reduceOnly ? " [R]" : "";
 }
 
 /**
@@ -228,3 +230,39 @@ export function buildTpSlExchangeOrder(params: {
 		t: { trigger: { isMarket: true, triggerPx, tpsl: params.tpsl } },
 	};
 }
+
+/**
+ * Plain resting limit orders to re-post when a market's order type changes.
+ *
+ * Only PLAIN resting limit orders qualify:
+ *  - TP/SL and other trigger orders carry their own time-in-force and are never
+ *    touched here — this selector is about limit orders and nothing else;
+ *  - other markets are irrelevant to the form that switched;
+ *  - an order already in the target type has nothing to change.
+ *
+ * `tif` and `isTrigger` are read defensively: the live feed and the preview book
+ * describe the same order with slightly different inferred types.
+ */
+export function restingOrdersForTifSwitch<T extends { coin: string; oid: number }>(
+	orders: readonly T[],
+	coin: string,
+	nextTif: string,
+): T[] {
+	// A builder market is "dex:coin" on one side and "coin" on the other, so compare
+	// the short symbol of BOTH.
+	const short = (name: string) => (name.includes(":") ? name.slice(name.indexOf(":") + 1) : name);
+	return orders.filter((order) => {
+		const { tif, isTrigger } = order as { tif?: string; isTrigger?: boolean };
+		return short(order.coin) === short(coin) && isTrigger !== true && tif !== nextTif;
+	});
+}
+
+/**
+ * The orders a time-in-force switch should re-post for one market.
+ *
+ * Only PLAIN resting limit orders qualify:
+ *  - TP/SL and other trigger orders carry their own time-in-force and are never
+ *    touched by this (that is the caller's "limit orders only" rule);
+ *  - other markets are irrelevant to the form that switched;
+ *  - an order already in the target type has nothing to change.
+ */

@@ -33,6 +33,7 @@ import { useMarketActions } from "@/stores/use-market-store";
 import { useOrderEntryActions } from "@/stores/use-order-entry-store";
 import { usePaperActions, usePaperOpenOrderRows } from "@/stores/use-paper-store";
 import { AssetBadge } from "../components/asset-badge";
+import { OrderTifStatus } from "./order-tif-status";
 import { Placeholder } from "./placeholder";
 import {
 	positionsPanelRowHoverClass,
@@ -249,7 +250,7 @@ export function OrdersTab() {
 			<div className={positionsPanelTableShellClass}>
 				{placeholder ?? (
 					<ScrollArea className="h-full w-full">
-						<Table className="table-fixed min-w-[60rem] w-full">
+						<Table className="table-fixed min-w-[68rem] w-full">
 							<TableHeader className={positionsPanelTableHeaderClass}>
 								<TableRow className={positionsPanelTableHeaderRowClass}>
 									<TableHead
@@ -265,26 +266,29 @@ export function OrdersTab() {
 											disabled={openOrders.length === 0}
 										/>
 									</TableHead>
-									<TableHead scope="col" size="dense" className={cn(positionsPanelTableHeadClass, "w-[13%] text-left")}>
+									<TableHead scope="col" size="dense" className={cn(positionsPanelTableHeadClass, "w-[10%] text-left")}>
 										{t`Time`}
 									</TableHead>
-									<TableHead scope="col" size="dense" className={cn(positionsPanelTableHeadClass, "w-[19%] text-left")}>
+									<TableHead scope="col" size="dense" className={cn(positionsPanelTableHeadClass, "w-[15%] text-left")}>
 										{t`Asset`}
 									</TableHead>
-									<TableHead scope="col" size="dense" className={cn(positionsPanelTableHeadClass, "w-[15%] text-left")}>
+									<TableHead scope="col" size="dense" className={cn(positionsPanelTableHeadClass, "w-[11%] text-left")}>
 										{t`Type`}
+									</TableHead>
+									<TableHead scope="col" size="dense" className={cn(positionsPanelTableHeadClass, "w-[13%] text-left")}>
+										{t`Time in force`}
 									</TableHead>
 									<TableHead
 										scope="col"
 										size="dense"
-										className={cn(positionsPanelTableHeadClass, "w-[13%] text-right")}
+										className={cn(positionsPanelTableHeadClass, "w-[12%] text-right")}
 									>
 										{t`Price`}
 									</TableHead>
 									<TableHead
 										scope="col"
 										size="dense"
-										className={cn(positionsPanelTableHeadClass, "w-[15%] text-right")}
+										className={cn(positionsPanelTableHeadClass, "w-[14%] text-right")}
 									>
 										{t`Size`}
 									</TableHead>
@@ -386,6 +390,9 @@ function OrderRow({
 						{typeConfig.reduceOnly ? <span className="text-2xs uppercase text-fg-muted">RO</span> : null}
 					</span>
 				</Tooltip>
+			</TableCell>
+			<TableCell size="dense" className={positionsPanelTableCellClass}>
+				<OrderTifStatus order={order} />
 			</TableCell>
 			<TableCell size="dense" className={cn(positionsPanelTableCellClass, "text-right tabular-nums text-fg")}>
 				<span className="text-xs font-semibold tabular-nums leading-tight">

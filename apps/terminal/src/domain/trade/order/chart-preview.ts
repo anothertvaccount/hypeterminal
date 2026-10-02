@@ -7,7 +7,7 @@ export type PreviewKind = "limit" | "tp" | "sl" | "scaleStart" | "scaleEnd" | "s
 function previewTitle(kind: PreviewKind, side: "buy" | "sell"): string {
 	switch (kind) {
 		case "limit":
-			return `${side === "buy" ? "BUY" : "SELL"} LIMIT`;
+			return side === "buy" ? "BUY" : "SELL";
 		case "tp":
 			return "TAKE PROFIT";
 		case "sl":

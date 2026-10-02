@@ -2,6 +2,7 @@ import Big from "big.js";
 import { type Overlay, type OverlayEvent, type OverlayFigure, registerOverlay, type YAxis } from "klinecharts";
 import type { LineOverlayResolution } from "@/domain/trade/order/chart-labels";
 import { noteChartOverlayInteraction } from "./overlay-interaction";
+import { ORDER_LABEL_AXIS_GUTTER } from "./price-axis";
 import { colorToHex, colorToRgba, getChartColors } from "./theme-colors";
 
 /**
@@ -133,6 +134,7 @@ function boxKeyAt(event: OverlayEvent): string | undefined {
  */
 const DRAG_STAMP_PX = 4;
 let pressOrigin: { x: number; y: number } | null = null;
+let pressMoved = false;
 
 export function createLineOverlay({ style, resolve, draggable = false, movable = false, ...config }: Config) {
 	let registered = false;
@@ -165,6 +167,7 @@ export function createLineOverlay({ style, resolve, draggable = false, movable =
 				return true;
 			},
 			onPressedMoveStart: (event) => {
+				pressMoved = false;
 				pressOrigin = typeof event.x === "number" && typeof event.y === "number" ? { x: event.x, y: event.y } : null;
 				const extendData = getExtendData(event);
 				const key = boxKeyAt(event);
@@ -181,15 +184,18 @@ export function createLineOverlay({ style, resolve, draggable = false, movable =
 					typeof event.y === "number" &&
 					Math.hypot(event.x - pressOrigin.x, event.y - pressOrigin.y) > DRAG_STAMP_PX
 				) {
+					pressMoved = true;
 					noteChartOverlayInteraction();
 				}
 				return getExtendData(event)?.onPressMoving?.(event) ?? false;
 			},
 			onPressedMoveEnd: (event) => {
+				const moved = pressMoved;
+				pressMoved = false;
 				pressOrigin = null;
 				const extendData = getExtendData(event);
 				extendData?.onPressEnd?.(event);
-				if (draggable && extendData?.onDragEnd) {
+				if (draggable && moved && extendData?.onDragEnd) {
 					const value = event.overlay.points[0]?.value;
 					if (typeof value === "number" && Number.isFinite(value) && value > 0) {
 						extendData.onDragEnd(value);
@@ -362,9 +368,27 @@ export function createLineOverlay({ style, resolve, draggable = false, movable =
 					return stripBoxes;
 				};
 
-				const mainWidths = measureCells(segments);
+				// Long phone labels must keep their action cells left of the axis picker.
+				const mainSegments = segments.map((segment) => ({ ...segment }));
+				const mainWidths = measureCells(mainSegments);
+				let overflow = totalWidth(mainWidths) - Math.max(0, bounding.width - ROW_INSET - ORDER_LABEL_AXIS_GUTTER);
+				const shrinkable = mainSegments
+					.map((segment, index) => ({ segment, index }))
+					.filter(({ segment }) => !segment.key)
+					.sort((a, b) => mainWidths[b.index] - mainWidths[a.index]);
+				for (const { segment, index } of shrinkable) {
+					if (overflow <= 0) break;
+					const reduction = Math.min(overflow, Math.max(0, mainWidths[index] - measureLabelWidth("…") - PADDING_X * 2));
+					if (reduction <= 0) continue;
+					mainWidths[index] -= reduction;
+					overflow -= reduction;
+					const available = mainWidths[index] - PADDING_X * 2;
+					let text = segment.text;
+					while (text && measureLabelWidth(`${text}…`) > available) text = text.slice(0, -1);
+					segment.text = `${text}…`;
+				}
 				const mainAnchor = rowAnchor(totalWidth(mainWidths), bounding.width);
-				boxes.push(...drawStrip(segments, mainWidths, mainAnchor, rowY, true, isBuy ? green : red));
+				boxes.push(...drawStrip(mainSegments, mainWidths, mainAnchor, rowY, true, isBuy ? green : red));
 				if (extendData) extendData.boxes = boxes;
 				if (import.meta.env.DEV) {
 					// Debug affordance for browser test scripts: pixel hit-regions per overlay (dev builds only).
